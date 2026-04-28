@@ -451,7 +451,7 @@ class MotorcycleLateralCorrector(TrackSmoother):
         corrected_pos = filtered_pos
         if self.lateral_enabled and self.is_motorcycle():
             corrected_pos = self.apply_lateral_correction(raw_pos, filtered_pos, px_per_m)
-            correction_applied = not np.allclose(corrected_pos, raw_pos, atol=1e-3)
+            correction_applied = not np.allclose(corrected_pos, filtered_pos, atol=1e-3)
 
         result = super().update(corrected_pos.tolist(), dt, px_per_m, svg_heading)
         result.update({
@@ -513,20 +513,20 @@ class MotorcycleLateralCorrector(TrackSmoother):
         lateral_component = np.dot(residual, perpendicular) * perpendicular
         residual_lateral = abs(np.dot(residual, perpendicular))
 
-        strength = self.calculate_correction_strength()
         is_shock = (
             (np.isfinite(lateral_ratio) and lateral_ratio >= self.shock_ratio_threshold) or
             residual_lateral >= self.shock_lateral_px
         )
 
-        if is_shock:
-            corrected_pos = (
-                filtered_pos +
-                self.shock_longitudinal_factor * longitudinal_component +
-                self.shock_lateral_factor * lateral_component
-            )
-        else:
-            corrected_pos = filtered_pos + 0.2 * longitudinal_component + (1.0 - strength) * lateral_component
+        if not is_shock:
+            self.consecutive_corrections = 0
+            return filtered_pos
+
+        corrected_pos = (
+            filtered_pos +
+            self.shock_longitudinal_factor * longitudinal_component +
+            self.shock_lateral_factor * lateral_component
+        )
 
         max_correction_px = self.max_correction_distance * px_per_m
         offset = corrected_pos - filtered_pos
@@ -534,16 +534,13 @@ class MotorcycleLateralCorrector(TrackSmoother):
         if offset_norm > max_correction_px:
             corrected_pos = filtered_pos + offset * (max_correction_px / offset_norm)
 
-        if len(self.pos_history) >= 2 and not is_shock:
-            corrected_pos = self.apply_additional_smoothing(corrected_pos, filtered_pos)
-
         self.consecutive_corrections += 1
         correction_data = {
             'original_pos': measurement_pos.tolist(),
             'filtered_pos': filtered_pos.tolist(),
             'corrected_pos': corrected_pos.tolist(),
             'lateral_ratio': lateral_ratio,
-            'correction_strength': strength
+            'correction_strength': 1.0
         }
         self.correction_history.append(correction_data)
         logging.info(

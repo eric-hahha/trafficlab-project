@@ -316,14 +316,14 @@ configs:
         heading_lock_lateral_blend: 0.0
 
       lateral_correction:
-        enabled: true                    # Enable lateral trajectory correction
+        enabled: true                    # Enable shock-only lateral outlier clamp
         vehicle_classes: ["motor", "two_wheeler"]  # Applicable vehicle classes
-        threshold: 1.2                   # Lower threshold so lateral jumps are corrected earlier
-        strength: 0.75                   # Stronger base correction for motorcycle jitter
-        window_size: 9                   # Slightly larger correction history window
+        threshold: 1.2                   # Detect lateral jumps; non-shock jumps are left to heading lock
+        strength: 0.75                   # Legacy setting; general lateral blending is disabled
+        window_size: 9                   # Correction history window for diagnostics
         max_distance: 2.5                # Stronger than before, but capped to avoid overcorrection
-        aggressive_factor: 1.45          # Extra multiplier for lateral recovery
-        prediction_weight: 0.3           # Blend with predicted path for steadier recovery
+        aggressive_factor: 1.45          # Legacy setting; kept for config compatibility
+        prediction_weight: 0.3           # Legacy setting; additional smoothing is disabled
         min_jump_lateral_px: 0.6         # Trigger correction even when forward motion is small
         shock_ratio_threshold: 6.0       # Treat very large lateral ratios as hard lateral glitches
         shock_lateral_px: 4.0            # Absolute lateral residual threshold for shock suppression
