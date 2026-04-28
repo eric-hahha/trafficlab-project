@@ -1,0 +1,39 @@
+# Python bytecode and caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and local Python tooling
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local project metadata
+.codex/
+
+# Logs
+*.log
+
+# Generated inference outputs
+output/*
+!output/README.md
+
+# Large local assets that should not be pushed
+models/*.pt
+location/*/footage/*.mp4
