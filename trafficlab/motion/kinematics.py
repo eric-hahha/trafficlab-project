@@ -290,9 +290,12 @@ class MotorcycleMotionFilter:
         self.heading_lock_angle_deg = config.get('heading_lock_angle_deg', 12.0)
         self.heading_lock_speed_kmh = config.get('heading_lock_speed_kmh', 10.0)
         self.heading_lock_min_lateral_px = config.get('heading_lock_min_lateral_px', 1.0)
+        self.heading_lock_alpha = config.get('heading_lock_alpha', 0.12)
+        self.heading_lock_lateral_blend = config.get('heading_lock_lateral_blend', 0.0)
 
         self.position = None
         self.velocity = np.array([0.0, 0.0], dtype=float)
+        self.lock_heading_vec = None
 
     def _estimate_heading(self, pos_history: deque, window: int = 3) -> np.ndarray:
         window = max(2, int(window))
@@ -310,33 +313,49 @@ class MotorcycleMotionFilter:
             return np.array([1.0, 0.0], dtype=float)
         return heading / norm
 
-    def _apply_heading_lock(self, innovation: np.ndarray, heading_unit: np.ndarray, dt: float, px_per_m: float, pos_history: deque) -> tuple[np.ndarray, bool]:
+    def _update_lock_heading(self, pos_history: deque) -> np.ndarray:
+        path_heading = self._estimate_heading(pos_history, self.heading_lock_window)
+        if self.lock_heading_vec is None:
+            self.lock_heading_vec = path_heading
+            return self.lock_heading_vec
+
+        candidate = path_heading
+        if np.dot(candidate, self.lock_heading_vec) < 0:
+            candidate = -candidate
+
+        updated = (1 - self.heading_lock_alpha) * self.lock_heading_vec + self.heading_lock_alpha * candidate
+        norm = np.linalg.norm(updated)
+        if norm > 1e-6:
+            self.lock_heading_vec = updated / norm
+        return self.lock_heading_vec
+
+    def _apply_heading_lock(self, innovation: np.ndarray, heading_unit: np.ndarray, dt: float, px_per_m: float, pos_history: deque) -> tuple[np.ndarray, bool, np.ndarray]:
+        lock_heading = heading_unit
         perpendicular = np.array([-heading_unit[1], heading_unit[0]], dtype=float)
         longitudinal = np.dot(innovation, heading_unit) * heading_unit
         lateral = np.dot(innovation, perpendicular) * perpendicular
 
         if not self.heading_lock_enabled or len(pos_history) < max(3, self.heading_lock_window):
-            return longitudinal + lateral, False
+            return longitudinal + lateral, False, heading_unit
 
         movement_vec = innovation
         move_norm = np.linalg.norm(movement_vec)
-        lateral_norm = np.linalg.norm(lateral)
+        lock_perpendicular = np.array([-lock_heading[1], lock_heading[0]], dtype=float)
+        lock_longitudinal = np.dot(innovation, lock_heading) * lock_heading
+        lock_lateral = np.dot(innovation, lock_perpendicular) * lock_perpendicular
+        lateral_norm = np.linalg.norm(lock_lateral)
         speed_kmh = (move_norm / max(px_per_m, 1e-6) / max(dt, 1e-3)) * 3.6
         if move_norm < 1e-6 or speed_kmh < self.heading_lock_speed_kmh or lateral_norm < self.heading_lock_min_lateral_px:
-            return longitudinal + lateral, False
-
-        lock_heading = self._estimate_heading(pos_history, self.heading_lock_window)
-        lock_norm = np.linalg.norm(lock_heading)
-        if lock_norm < 1e-6:
-            return longitudinal + lateral, False
+            return longitudinal + lateral, False, heading_unit
 
         movement_unit = movement_vec / move_norm
-        cos_angle = np.clip(np.dot(movement_unit, lock_heading / lock_norm), -1.0, 1.0)
+        cos_angle = np.clip(np.dot(movement_unit, lock_heading), -1.0, 1.0)
         angle_deg = math.degrees(math.acos(cos_angle))
         if angle_deg <= self.heading_lock_angle_deg:
-            return longitudinal + lateral, False
+            return longitudinal + lateral, False, heading_unit
 
-        return longitudinal, True
+        locked = lock_longitudinal + self.heading_lock_lateral_blend * lock_lateral
+        return locked, True, lock_heading
 
     def filter(self, measurement: np.ndarray, dt: float, px_per_m: float, pos_history: deque) -> np.ndarray:
         measurement = np.array(measurement, dtype=float)
@@ -350,16 +369,19 @@ class MotorcycleMotionFilter:
 
         dt = max(float(dt), 1e-3)
         predicted_pos = self.position + self.velocity * dt
-        heading_unit = self._estimate_heading(pos_history)
+        heading_unit = self._update_lock_heading(pos_history)
 
         innovation = measurement - predicted_pos
-        locked_innovation, _heading_locked = self._apply_heading_lock(innovation, heading_unit, dt, px_per_m, pos_history)
+        locked_innovation, heading_locked, heading_unit = self._apply_heading_lock(innovation, heading_unit, dt, px_per_m, pos_history)
         perpendicular = np.array([-heading_unit[1], heading_unit[0]], dtype=float)
         longitudinal = np.dot(locked_innovation, heading_unit) * heading_unit
         lateral = np.dot(locked_innovation, perpendicular) * perpendicular
 
-        filtered_pos = predicted_pos + self.longitudinal_blend * longitudinal + self.lateral_blend * lateral
+        lateral_blend = self.heading_lock_lateral_blend if heading_locked else self.lateral_blend
+        filtered_pos = predicted_pos + self.longitudinal_blend * longitudinal + lateral_blend * lateral
         filtered_velocity = self.velocity + self.velocity_blend * (filtered_pos - self.position) / dt
+        if heading_locked:
+            filtered_velocity = np.dot(filtered_velocity, heading_unit) * heading_unit
 
         offset = filtered_pos - measurement
         offset_norm = np.linalg.norm(offset)
