@@ -296,7 +296,7 @@ configs:
 
       # Lateral correction for motorcycles
       motorcycle_filter:
-        enabled: true
+        enabled: false
         process_noise_px: 3.0
         measurement_noise_px: 2.5
         longitudinal_noise_px: 2.0
@@ -307,7 +307,7 @@ configs:
         longitudinal_blend: 0.65
         lateral_blend: 0.2
         velocity_blend: 0.12
-        heading_lock_enabled: true
+        heading_lock_enabled: false
         heading_lock_window: 5 #10
         heading_lock_angle_deg: 12.0
         heading_lock_speed_kmh: 5.0 #10.0
@@ -316,7 +316,7 @@ configs:
         heading_lock_lateral_blend: 0.0
 
       lateral_correction:
-        enabled: true                    # Enable shock-only lateral outlier clamp
+        enabled: false                   # Disabled to isolate heading lock / motorcycle_filter behavior
         vehicle_classes: ["motor", "two_wheeler"]  # Applicable vehicle classes
         threshold: 1.2                   # Detect lateral jumps; non-shock jumps are left to heading lock
         strength: 0.75                   # Legacy setting; general lateral blending is disabled
