@@ -324,11 +324,11 @@ direction_correction:
   centerline_mode: "global_pca"
   window_size: 15
   min_points: 8
-  max_angle_from_axis_deg: 25
-  max_lateral_offset_px: 3.0
-  lateral_retention: 0.15
+  max_angle_from_axis_deg: 18
+  max_lateral_offset_px: 2.0
+  lateral_retention: 0.05
   preserve_longitudinal_progress: true
-  max_correction_px: 12.0
+  max_correction_px: 16.0
 ```
 
 Behavior requirements:
@@ -351,7 +351,7 @@ Recommended metadata:
     "diagnostics": {
       "axis_angle_deg": 37.2,
       "lateral_offset_px": 7.4,
-      "lateral_retention": 0.15
+      "lateral_retention": 0.05
     }
   }
 }
@@ -645,11 +645,11 @@ direction_correction:
   centerline_mode: global_pca
   window_size: 15
   min_points: 8
-  max_angle_from_axis_deg: 25
-  max_lateral_offset_px: 3.0
-  lateral_retention: 0.15
+  max_angle_from_axis_deg: 18
+  max_lateral_offset_px: 2.0
+  lateral_retention: 0.05
   preserve_longitudinal_progress: true
-  max_correction_px: 12.0
+  max_correction_px: 16.0
 
 outlier_detection:
   enabled: true
