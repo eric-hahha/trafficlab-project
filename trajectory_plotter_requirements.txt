@@ -1,4 +1,0 @@
-# Requirements for trajectory_plotter.py
-matplotlib>=3.5.0
-numpy>=1.21.0
-Pillow>=8.3.0
