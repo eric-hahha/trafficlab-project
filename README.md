@@ -132,6 +132,15 @@ conda env create -f environment.yml
 python main.py
 ```
 
+If you want to run inference without opening the GUI, use the CLI helper instead:
+
+```bash
+conda activate trafficlab
+python scripts/run_inference.py --config-name car_heading_smooth --all-pending
+```
+
+This command automatically sets `PYTORCH_ENABLE_MPS_FALLBACK=1` when it is not already defined, scans `location/*/footage/*.mp4`, skips videos whose `.json.gz` output already exists, and runs the same `InferencePipeline` used by the GUI.
+
 In this [Google Drive](https://drive.google.com/drive/folders/14NVnbrUUfII3tRdI8OOEPnLzKbs3SPvn?usp=sharing), you can find:
 
 - Some finetuned `YOLOv8-s` and `YOLOv11-s` models for the `models/` folder.
