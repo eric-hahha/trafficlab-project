@@ -16,7 +16,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBo
                              QGraphicsPixmapItem, QGraphicsPolygonItem, 
                              QGraphicsLineItem, QGraphicsSimpleTextItem, 
                              QGraphicsItemGroup, QSpinBox, QShortcut, QToolButton, 
-                             QMessageBox, QGraphicsEllipseItem, QDialog, QTextEdit, QPushButton, QScrollArea)
+                             QMessageBox, QGraphicsEllipseItem, QDialog, QTextEdit, QPushButton, QScrollArea,
+                             QFileDialog)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF, QLineF
 from PyQt5.QtGui import (QImage, QPixmap, QColor, QPen, QBrush, 
                          QPolygonF, QTransform, QPainter, QKeySequence)
@@ -24,6 +25,7 @@ from PyQt5.QtGui import (QImage, QPixmap, QColor, QPen, QBrush,
 from trafficlab.visualization.video_player import VideoPlayer
 from trafficlab.visualization.cctv_renderer import CCTRenderer, get_color_from_string
 from trafficlab.visualization.sat_renderer import SatRenderer
+from trafficlab.visualization.replay_loader import ReplayLoader
 from trafficlab.visualization.svg_parser import SVGLayoutParser
 from trafficlab.gui.views import SatGraphicsView, CCTVGraphicsView
 
@@ -82,6 +84,7 @@ class VisualizationTab(QWidget):
 
         self.svg_layer_groups = {} 
         self.file_paths = []
+        self.current_file_path = None
 
         self.cct_renderer = CCTRenderer()
         self.sat_renderer = SatRenderer()
@@ -121,6 +124,11 @@ class VisualizationTab(QWidget):
         self.btn_load_selected.clicked.connect(self.load_selected_file)
         self.btn_load_selected.setStyleSheet("QToolButton { border: 1px solid #888; border-radius:4px; padding:4px; }")
         btn_row.addWidget(self.btn_load_selected)
+        self.btn_open_file = QToolButton()
+        self.btn_open_file.setText("Open File")
+        self.btn_open_file.clicked.connect(self.open_file_dialog)
+        self.btn_open_file.setStyleSheet("QToolButton { border: 1px solid #888; border-radius:4px; padding:4px; }")
+        btn_row.addWidget(self.btn_open_file)
         # Add List Files button inline so all three are on the same row
         self.btn_list_files = QToolButton()
         self.btn_list_files.setText("List Files")
@@ -451,57 +459,115 @@ class VisualizationTab(QWidget):
         self.file_combo.blockSignals(False)
 
     def load_selected_file(self):
-        # Debug: confirm this method is being invoked
-        try:
-            # print("[ROI] load_selected_file called; combo_index=", self.file_combo.currentIndex(), "file_paths_len=", len(self.file_paths), flush=True)
-            try: self.lbl_info.setText("Loading selected file...")
-            except: pass
-        except Exception:
-            pass
         idx = self.file_combo.currentIndex()
-        if idx < 0 or not self.file_paths: return
+        if idx < 0 or idx >= len(self.file_paths):
+            return
+        self.load_file(self.file_paths[idx], sync_combo=False)
+
+    def open_file_dialog(self):
+        start_dir = OUTPUT_DIR if os.path.isdir(OUTPUT_DIR) else os.getcwd()
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Replay JSON",
+            start_dir,
+            "Replay Files (*.json.gz *.json);;All Files (*)",
+        )
+        if path:
+            self.load_file(path)
+
+    def load_file(self, path, sync_combo=True):
         try:
-            path = self.file_paths[idx]
-            if path.endswith('.gz'):
-                with gzip.open(path, 'rt', encoding='utf-8') as f:
-                    data = json.load(f)
-            else:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+            self.lbl_info.setText(f"Loading: {path}")
+            self.is_paused = True
+            data = ReplayLoader.load(path)
+            self.current_file_path = path
+            self._reset_loaded_media()
+
             self.current_json_data = data
             self.json_frame_map = {f["frame_index"]: f["objects"] for f in data.get("frames", [])}
-            
-            # Check 3D availability - look for 'have_measurements' or presence of 'bbox_3d'
+            self.current_frame_idx = 0
+
             self.has_3d_data = False
-            for f in data['frames'][:50]:
-                for o in f['objects']:
+            for f in data.get("frames", [])[:50]:
+                for o in f.get("objects", []):
                     if o.get('have_measurements', False) or (o.get('bbox_3d') and len(o['bbox_3d']) == 8):
                         self.has_3d_data = True
                         break
-                if self.has_3d_data: break
-            
+                if self.has_3d_data:
+                    break
+
             self.chk_3d_box.setEnabled(self.has_3d_data)
             self.chk_3d_box.setChecked(self.has_3d_data)
-            
+
             self.setup_video(data)
             self.setup_sat_view(data)
             self.load_roi_mask(data)
-            
-            # Use mp4_frame_count if animation_frame_count absent
-            max_frames = data.get("animation_frame_count", data.get("mp4_frame_count", 1))
+
+            max_frames = max(1, data.get("animation_frame_count", data.get("mp4_frame_count", 1)))
             self.progress_bar.setRange(0, max_frames - 1)
-            
+
             self.speed_display_cache = {}
-            self.is_paused = True
+            self.actual_fps = 0.0
+            self.last_real_time = 0
             self.update_frame()
-            # Ensure CCTV view is fitted to the video after the first frame is drawn
-            try:
-                self.fit_cctv_to_viewport()
-            except Exception:
-                pass
+            self.fit_cctv_to_viewport()
+            self.fit_sat_to_viewport()
+
+            if sync_combo:
+                self._sync_combo_to_path(path)
         except Exception as e:
             self.lbl_info.setText(f"Err: {e}")
             import traceback; traceback.print_exc()
+
+    def _sync_combo_to_path(self, path):
+        try:
+            target = os.path.abspath(path)
+            idx = next(
+                (i for i, p in enumerate(self.file_paths) if os.path.abspath(p) == target),
+                -1,
+            )
+            self.file_combo.blockSignals(True)
+            if idx >= 0:
+                self.file_combo.setCurrentIndex(idx)
+            else:
+                self.file_combo.setCurrentIndex(-1)
+            self.file_combo.blockSignals(False)
+        except Exception:
+            try:
+                self.file_combo.blockSignals(False)
+            except Exception:
+                pass
+
+    def _reset_loaded_media(self):
+        if self.player:
+            try:
+                self.player.release()
+            except Exception:
+                pass
+        self.player = None
+        self.current_json_data = None
+        self.json_frame_map = {}
+        self.g_data = None
+        self.roi_mask = None
+        self.roi_overlay_item = None
+        self.sat_pixmap_item = None
+        self.fov_item = None
+        self.camera_marker_item = None
+        self.camera_marker_text = None
+        self.sat_use_svg = True
+        self.cctv_pixmap_item.setPixmap(QPixmap())
+        self.cctv_scene.setSceneRect(QRectF())
+        self.cctv_view.setTransform(QTransform())
+        self.sat_scene.clear()
+        self.sat_dyn_item = QGraphicsPixmapItem()
+        self.sat_dyn_item.setZValue(100)
+        self.sat_scene.addItem(self.sat_dyn_item)
+        self.sat_scene.setSceneRect(QRectF())
+        self.sat_view.setTransform(QTransform())
+        self.svg_layer_groups = {}
+        self.speed_display_cache = {}
+        if hasattr(self, 'sat_count_label'):
+            self.sat_count_label.hide()
 
     def setup_sat_view(self, data):
         self.sat_scene.clear()
@@ -654,6 +720,7 @@ class VisualizationTab(QWidget):
             self.fov_item = None
 
         self.update_sat_layers()
+        self.fit_sat_to_viewport()
 
     def show_file_list_dialog(self):
         dlg = QDialog(self)
@@ -853,6 +920,11 @@ class VisualizationTab(QWidget):
             self.lbl_info.setText(f"Video not found: {path}")
             return
         
+        if self.player:
+            try:
+                self.player.release()
+            except Exception:
+                pass
         self.player = VideoPlayer(path)
         self.target_fps = data["meta"].get("fps", 30)
         self.slider_fps.setValue(int(self.target_fps))
@@ -1028,6 +1100,21 @@ class VisualizationTab(QWidget):
                 self.cctv_scene.setSceneRect(rect)
                 self.cctv_view.fitInView(rect, Qt.KeepAspectRatio)
         except: pass
+
+    def fit_sat_to_viewport(self):
+        try:
+            if getattr(self, 'sat_view', None) is None:
+                return
+            self.sat_view.setTransform(QTransform())
+            if getattr(self, 'sat_pixmap_item', None) is not None:
+                rect = self.sat_pixmap_item.boundingRect()
+            else:
+                rect = self.sat_scene.itemsBoundingRect()
+            if not rect.isNull():
+                self.sat_scene.setSceneRect(rect)
+                self.sat_view.fitInView(rect, Qt.KeepAspectRatio)
+        except Exception:
+            pass
 
     def toggle_view_layout(self):
         try:

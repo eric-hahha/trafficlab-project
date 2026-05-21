@@ -46,6 +46,37 @@ class InferencePipeline:
         self.progress_fn = progress_fn or (lambda pct: None)
         self.stop_flag_fn = stop_flag_fn or (lambda: False)
 
+    def _build_tracker_config(self, tracking_cfg, output_dir):
+        tracker_type = (tracking_cfg or {}).get('tracker_type', 'bytetrack')
+        tracker_yaml = {
+            "tracker_type": tracker_type,
+            "track_high_thresh": tracking_cfg.get('track_high_thresh', 0.25),
+            "track_low_thresh": tracking_cfg.get('track_low_thresh', 0.1),
+            "new_track_thresh": tracking_cfg.get('new_track_thresh', 0.25),
+            "match_thresh": tracking_cfg.get('match_thresh', 0.8),
+            "track_buffer": tracking_cfg.get('track_buffer', 30),
+            "fuse_score": tracking_cfg.get('fuse_score', True),
+        }
+
+        if tracker_type == "botsort":
+            tracker_yaml.update({
+                "gmc_method": tracking_cfg.get("gmc_method", "sparseOptFlow"),
+                "proximity_thresh": tracking_cfg.get("proximity_thresh", 0.5),
+                "appearance_thresh": tracking_cfg.get("appearance_thresh", 0.8),
+                "with_reid": tracking_cfg.get("with_reid", False),
+                "model": tracking_cfg.get("model", "auto"),
+            })
+        else:
+            # Keep any extra tracker params if a config provides them.
+            for key in ("gmc_method", "proximity_thresh", "appearance_thresh", "with_reid", "model"):
+                if key in tracking_cfg:
+                    tracker_yaml[key] = tracking_cfg[key]
+
+        tracker_path = os.path.join(output_dir, f"{tracker_type}_tracker.yaml")
+        with open(tracker_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(tracker_yaml, f, sort_keys=False)
+        return tracker_path
+
     def run(self):
         # 1. Load Configs (support new YAML that contains 'configs')
         with open(self.config_path, 'r') as f:
@@ -81,7 +112,8 @@ class InferencePipeline:
         footage_name = os.path.basename(self.footage_path)
         # use chosen config_name for folder naming (already set above)
         model_name = Path(full_config['model']['weights']).stem
-        tracker_type = full_config['tracking']['tracker_type']
+        tracking_cfg = full_config.get('tracking', {})
+        tracker_type = tracking_cfg.get('tracker_type', 'default')
 
         config_dir = os.path.join(self.output_root, f"model-{model_name}_tracker-{tracker_type}", config_name)
         os.makedirs(config_dir, exist_ok=True)
@@ -117,6 +149,13 @@ class InferencePipeline:
         # Model Init
         self.log_fn(f"Loading Model: {full_config['model']['weights']}")
         model = YOLO(full_config['model']['weights'])
+        use_explicit_tracker_config = tracking_cfg.get('use_explicit_tracker_config', True)
+        tracker_cfg_path = None
+        if use_explicit_tracker_config:
+            tracker_cfg_path = self._build_tracker_config(tracking_cfg, config_dir)
+            self.log_fn(f"Using tracker config: {tracker_cfg_path}")
+        else:
+            self.log_fn("Using Ultralytics default tracker behavior (no explicit tracker config).")
 
         # Tracking State
         track_smoothers = {} # tid -> Smoother
@@ -135,16 +174,23 @@ class InferencePipeline:
         frames_to_process = min(total_frames, max_frame) if max_frame > 0 else total_frames
 
         # Run Loop
-        results = model.track(
-            source=self.footage_path,
-            device=full_config['model']['device'],
-            persist=True,
-            verbose=False,
-            stream=True,
-            conf=full_config['model']['conf'],
-            iou=full_config['model']['iou'],
-            imgsz=full_config['model']['imgsz']
-        )
+        track_kwargs = {
+            "source": self.footage_path,
+            "device": full_config['model']['device'],
+            "persist": tracking_cfg.get('persist', True),
+            "verbose": full_config['model'].get('verbose', False),
+            "stream": True,
+            "conf": full_config['model']['conf'],
+            "iou": full_config['model']['iou'],
+            "imgsz": full_config['model']['imgsz'],
+            "max_det": full_config['model'].get('max_det', 300),
+            "agnostic_nms": full_config['model'].get('agnostic_nms', False),
+            "half": full_config['model'].get('half', False),
+        }
+        if tracker_cfg_path is not None:
+            track_kwargs["tracker"] = tracker_cfg_path
+
+        results = model.track(**track_kwargs)
 
         for i, r in enumerate(results):
             if self.stop_flag_fn() or (max_frame > 0 and i >= max_frame): break
