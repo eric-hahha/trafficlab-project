@@ -84,6 +84,63 @@ configs:
         half: false
 
       tracking:
+        tracker_type: "default"
+        persist: true
+        track_high_thresh: 0.25
+        track_low_thresh: 0.1
+        new_track_thresh: 0.25
+        match_thresh: 0.8
+        track_buffer: 30
+        fuse_score: true
+
+      kinematics:
+        displacement_threshold: 0.25
+
+        heading_sampling_rate: 15
+        heading_smoothing: "adaptive_ema"
+
+        heading_ema:
+          alpha_min: 0.05
+          alpha_max: 0.4
+          speed_ref: 3.0
+
+        heading_min_speed_for_update: 0.1
+        heading_max_jump: 5
+        heading_recovery_frames: 10
+
+        heading_cosine_weighting: true
+        heading_cosine_min_angle: 10
+        heading_cosine_max_angle: 30
+
+        heading_sat_coords_weighting: true
+        heading_sat_coords_jitter_radius: 0.5
+        heading_sat_coords_jitter_frames: 8
+
+        heading_freeze_on_lost: true
+        heading_freeze_max_lost: 15
+
+        speed_smoothing: "ema"
+        speed_ema_alpha: 0.4
+
+  slight_smoothing_best_bytetrack:
+      prior_dimensions: "measurements_visdrone_v2"
+
+      frames:
+        fps: 50
+        max_frame: -1
+
+      model:
+        weights: "./models/best.pt"
+        device: mps
+        verbose: false
+        imgsz: 960
+        conf: 0.35
+        iou: 0.5
+        max_det: 600
+        agnostic_nms: false
+        half: false
+
+      tracking:
         tracker_type: "bytetrack"
         persist: true
         track_high_thresh: 0.25
@@ -122,7 +179,7 @@ configs:
         speed_smoothing: "ema"
         speed_ema_alpha: 0.4
 
-  slight_smoothing_pre_bytetrack_behavior:
+  slight_default_best_default:
       prior_dimensions: "measurements_visdrone_v2"
 
       frames:
@@ -130,7 +187,7 @@ configs:
         max_frame: -1
 
       model:
-        weights: "./models/yolo11s-visdrone-v2-ft.pt"
+        weights: "./models/best.pt"
         device: mps
         verbose: false
         imgsz: 960
@@ -141,7 +198,7 @@ configs:
         half: false
 
       tracking:
-        tracker_type: "default"            # Match old behavior: do not pass an explicit tracker config
+        tracker_type: "default"
         use_explicit_tracker_config: false
         persist: true
         track_high_thresh: 0.25
@@ -180,124 +237,6 @@ configs:
         speed_smoothing: "ema"
         speed_ema_alpha: 0.4
 
-  slight_smoothing_best_botsort:
-      prior_dimensions: "measurements_visdrone_v2"
-
-      frames:
-        fps: 50
-        max_frame: -1
-
-      model:
-        weights: "./models/best.pt"
-        device: mps
-        verbose: false
-        imgsz: 960
-        conf: 0.35
-        iou: 0.5
-        max_det: 600
-        agnostic_nms: false
-        half: false
-
-      tracking:
-        tracker_type: "botsort"
-        persist: true
-        track_high_thresh: 0.25
-        track_low_thresh: 0.1
-        new_track_thresh: 0.25
-        match_thresh: 0.8
-        track_buffer: 30
-        fuse_score: true
-        gmc_method: "sparseOptFlow"
-        proximity_thresh: 0.5
-        appearance_thresh: 0.8
-        with_reid: false
-        model: "auto"
-
-      kinematics:
-        displacement_threshold: 0.25
-
-        heading_sampling_rate: 15
-        heading_smoothing: "adaptive_ema"
-
-        heading_ema:
-          alpha_min: 0.05
-          alpha_max: 0.4
-          speed_ref: 3.0
-
-        heading_min_speed_for_update: 0.1
-        heading_max_jump: 5
-        heading_recovery_frames: 10
-
-        heading_cosine_weighting: true
-        heading_cosine_min_angle: 10
-        heading_cosine_max_angle: 30
-
-        heading_sat_coords_weighting: true
-        heading_sat_coords_jitter_radius: 0.5
-        heading_sat_coords_jitter_frames: 8
-
-        heading_freeze_on_lost: true
-        heading_freeze_max_lost: 15
-
-        speed_smoothing: "ema"
-        speed_ema_alpha: 0.4
-
-  slight_smoothing_l:
-        prior_dimensions: "measurements_visdrone_v2"
-
-        frames:
-          fps: 50
-          max_frame: -1
-
-        model:
-          weights: "./models/yolo26l.pt" #yolo11s-visdrone-v2-ft.pt
-          device: mps
-          verbose: false
-          imgsz: 960
-          conf: 0.35
-          iou: 0.5
-          max_det: 600
-          agnostic_nms: false
-          half: true
-
-        tracking:
-          tracker_type: "bytetrack"
-          persist: true
-          track_high_thresh: 0.25
-          track_low_thresh: 0.1
-          new_track_thresh: 0.25
-          match_thresh: 0.8
-          track_buffer: 30
-          fuse_score: true
-
-        kinematics:
-          displacement_threshold: 0.25
-
-          heading_sampling_rate: 15
-          heading_smoothing: "adaptive_ema"
-
-          heading_ema:
-            alpha_min: 0.05
-            alpha_max: 0.4
-            speed_ref: 3.0
-
-          heading_min_speed_for_update: 0.1
-          heading_max_jump: 5
-          heading_recovery_frames: 10
-
-          heading_cosine_weighting: true
-          heading_cosine_min_angle: 10
-          heading_cosine_max_angle: 30
-
-          heading_sat_coords_weighting: true
-          heading_sat_coords_jitter_radius: 0.5
-          heading_sat_coords_jitter_frames: 8
-
-          heading_freeze_on_lost: true
-          heading_freeze_max_lost: 15
-
-          speed_smoothing: "ema"
-          speed_ema_alpha: 0.4
   
   car_heading_stable:
     prior_dimensions: "measurements_visdrone_v2"
@@ -318,7 +257,7 @@ configs:
       half: true
 
     tracking:
-      tracker_type: "bytetrack"
+      tracker_type: "default"
       persist: true
       track_high_thresh: 0.03
       track_low_thresh: 0.02
@@ -356,7 +295,7 @@ configs:
       speed_smoothing: "ema"
       speed_ema_alpha: 0.15         
 
-  test1:
+  test1_bytetrack:
     prior_dimensions: "measurements_visdrone_v2"
 
     frames:
@@ -458,109 +397,7 @@ configs:
           smoothness_threshold: 0.8      # Smoothness threshold
           log_corrections: true          # Log correction operations   
 
-  test1_no_bytetrack:
-    prior_dimensions: "measurements_visdrone_v2"
-
-    frames:
-      fps: 100
-      max_frame: -1
-
-    model:
-      weights: "./models/yolo11s-visdrone-v2-ft.pt"
-      device: mps
-      verbose: false
-      imgsz: 1280       # High resolution for better position accuracy
-      conf: 0.01        # Low confidence to maintain consistent detection
-      iou: 0.5
-      max_det: 800
-      agnostic_nms: false
-      half: true
-
-    tracking:
-      tracker_type: "botsort"            # Non-ByteTrack baseline for A/B comparison
-      persist: true
-      track_high_thresh: 0.03
-      track_low_thresh: 0.02
-      new_track_thresh: 0.25
-      match_thresh: 0.97
-      track_buffer: 60
-      fuse_score: true
-
-    kinematics:
-      displacement_threshold: 0.15  # Reduced from 0.25 to filter more detection noise
-
-      heading_sampling_rate: 25 
-      heading_smoothing: "adaptive_ema"
-
-      heading_ema:
-        alpha_min: 0.01             # Reduced from 0.02 for stronger smoothing
-        alpha_max: 0.1              # Reduced from 0.15 to limit max change rate
-        speed_ref: 2.0              # Adjusted from 3.5 for motorcycle speed range
-
-      heading_min_speed_for_update: 0.05  
-      heading_max_jump: 2           # Reduced from 3 for more stable heading
-      heading_recovery_frames: 40   # Increased from 30 for better stability
-
-      heading_cosine_weighting: true
-      heading_cosine_min_angle: 5   
-      heading_cosine_max_angle: 20  
-
-      heading_sat_coords_weighting: true
-      heading_sat_coords_jitter_radius: 0.3  # Reduced from 0.5 for stricter jitter detection
-      heading_sat_coords_jitter_frames: 20   # Increased from 15 for better jitter filtering
-
-      heading_freeze_on_lost: true
-      heading_freeze_max_lost: 20   
-
-      speed_smoothing: "ema"
-      speed_ema_alpha: 0.1          # Reduced from 0.15 for smoother speed changes
-
-      # Lateral correction for motorcycles
-      motorcycle_filter:
-        enabled: false
-        process_noise_px: 3.0
-        measurement_noise_px: 2.5
-        longitudinal_noise_px: 2.0
-        lateral_noise_px: 7.5
-        initial_covariance: 25.0
-        max_blend_offset_px: 12.0
-        prediction_blend: 0.85
-        longitudinal_blend: 0.65
-        lateral_blend: 0.2
-        velocity_blend: 0.12
-        heading_lock_enabled: false
-        heading_lock_window: 5 #10
-        heading_lock_angle_deg: 12.0
-        heading_lock_speed_kmh: 5.0 #10.0
-        heading_lock_min_lateral_px: 1.0
-        heading_lock_alpha: 0.12
-        heading_lock_lateral_blend: 0.0
-
-      lateral_correction:
-        enabled: false                   # Disabled to isolate heading lock / motorcycle_filter behavior
-        vehicle_classes: ["motor", "two_wheeler"]  # Applicable vehicle classes
-        threshold: 1.2                   # Detect lateral jumps; non-shock jumps are left to heading lock
-        strength: 0.75                   # Legacy setting; general lateral blending is disabled
-        window_size: 9                   # Correction history window for diagnostics
-        max_distance: 2.5                # Stronger than before, but capped to avoid overcorrection
-        aggressive_factor: 1.45          # Legacy setting; kept for config compatibility
-        prediction_weight: 0.3           # Legacy setting; additional smoothing is disabled
-        min_jump_lateral_px: 0.6         # Trigger correction even when forward motion is small
-        shock_ratio_threshold: 6.0       # Treat very large lateral ratios as hard lateral glitches
-        shock_lateral_px: 4.0            # Absolute lateral residual threshold for shock suppression
-        shock_longitudinal_factor: 0.12  # Keep only a little forward correction during shock frames
-        shock_lateral_factor: 0.02       # Almost fully ignore lateral measurement on shock frames
-        adaptive_strength:
-          enabled: true                  # Enable adaptive correction strength
-          min_strength: 0.45             # Keep correction active even on the first jump
-          max_strength: 1.0              # Allow full-strength recovery on persistent distortion
-          consecutive_threshold: 1       # Ramp up immediately on consecutive warped points
-        quality_validation:
-          enabled: true                  # Enable quality validation
-          smoothness_threshold: 0.8      # Smoothness threshold
-          log_corrections: true          # Log correction operations
-
-  test1_pre_bytetrack_behavior:
+  test1_default:
     prior_dimensions: "measurements_visdrone_v2"
 
     frames:
