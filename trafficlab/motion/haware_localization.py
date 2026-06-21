@@ -271,3 +271,63 @@ class HawareLocalizer:
             status=status,
             p_sat=p_sat,
         )
+
+
+# ---------------------------------------------------------------------------
+# Bbox IoU matching utilities (Method B: assign YOLO track IDs to h-aware detections)
+# ---------------------------------------------------------------------------
+
+def kp_bbox_xyxy(kp_data: np.ndarray, conf_thresh: float = 0.2) -> Optional[tuple]:
+    """Compute tight xyxy bbox from a (24, 3) keypoint array [x, y, conf].
+
+    Returns (x1, y1, x2, y2) in image pixels, or None if fewer than 2 visible keypoints.
+    """
+    vis = kp_data[kp_data[:, 2] > conf_thresh]
+    if len(vis) < 2:
+        return None
+    return (float(vis[:, 0].min()), float(vis[:, 1].min()),
+            float(vis[:, 0].max()), float(vis[:, 1].max()))
+
+
+def match_by_bbox_iou(
+    pifpaf_boxes: list,
+    yolo_boxes: list,
+    yolo_tids: list,
+    iou_threshold: float = 0.3,
+) -> list:
+    """Match PifPaf detections to YOLO tracks by bbox IoU.
+
+    Args:
+        pifpaf_boxes: list of (x1,y1,x2,y2) or None, one per PifPaf detection.
+        yolo_boxes:   list of (x1,y1,x2,y2), one per YOLO detection.
+        yolo_tids:    list of track IDs (int or None), same length as yolo_boxes.
+        iou_threshold: minimum IoU to accept a match.
+
+    Returns:
+        list of int|None, same length as pifpaf_boxes — the matched YOLO track ID,
+        or None if no YOLO box overlaps above the threshold.
+    """
+    result = []
+    for pb in pifpaf_boxes:
+        if pb is None or not yolo_boxes:
+            result.append(None)
+            continue
+
+        px1, py1, px2, py2 = pb
+        pa = max(0.0, px2 - px1) * max(0.0, py2 - py1)
+
+        best_iou = 0.0
+        best_tid = None
+        for (yx1, yy1, yx2, yy2), tid in zip(yolo_boxes, yolo_tids):
+            iw = max(0.0, min(px2, yx2) - max(px1, yx1))
+            ih = max(0.0, min(py2, yy2) - max(py1, yy1))
+            inter = iw * ih
+            ya = max(0.0, yx2 - yx1) * max(0.0, yy2 - yy1)
+            union = pa + ya - inter
+            iou = inter / union if union > 0 else 0.0
+            if iou > best_iou:
+                best_iou = iou
+                best_tid = tid
+
+        result.append(best_tid if best_iou >= iou_threshold else None)
+    return result

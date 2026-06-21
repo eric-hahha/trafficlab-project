@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import yaml
 import cv2
 import numpy as np
@@ -9,17 +10,6 @@ from ultralytics import YOLO
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
 from trafficlab.motion.bbox_heading import estimate_heading_from_bbox
-import logging
-
-# 設置日誌記錄
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('motorcycle_correction.log'),
-        logging.StreamHandler()
-    ]
-)
 from trafficlab.io.replay_writer import ReplayWriter
 
 
@@ -46,6 +36,11 @@ class InferencePipeline:
         self.log_fn = log_fn or (lambda msg: None)
         self.progress_fn = progress_fn or (lambda pct: None)
         self.stop_flag_fn = stop_flag_fn or (lambda: False)
+
+    @staticmethod
+    def config_output_dir(output_root, weights, tracker_type, config_name):
+        model_name = Path(weights).stem
+        return os.path.join(output_root, f"model-{model_name}_{tracker_type}", config_name)
 
     def _build_tracker_config(self, tracking_cfg, output_dir):
         tracker_type = (tracking_cfg or {}).get('tracker_type', 'bytetrack')
@@ -116,7 +111,7 @@ class InferencePipeline:
         tracking_cfg = full_config.get('tracking', {})
         tracker_type = tracking_cfg.get('tracker_type', 'default')
 
-        config_dir = os.path.join(self.output_root, f"model-{model_name}_{tracker_type}", config_name)
+        config_dir = InferencePipeline.config_output_dir(self.output_root, full_config['model']['weights'], tracker_type, config_name)
         os.makedirs(config_dir, exist_ok=True)
         out_subdir = os.path.join(config_dir, self.loc_code)
         os.makedirs(out_subdir, exist_ok=True)
@@ -150,13 +145,12 @@ class InferencePipeline:
         # Model Init
         self.log_fn(f"Loading Model: {full_config['model']['weights']}")
         model = YOLO(full_config['model']['weights'])
-        use_explicit_tracker_config = tracking_cfg.get('use_explicit_tracker_config', True)
         tracker_cfg_path = None
-        if use_explicit_tracker_config:
+        if tracker_type != 'default':
             tracker_cfg_path = self._build_tracker_config(tracking_cfg, config_dir)
             self.log_fn(f"Using tracker config: {tracker_cfg_path}")
         else:
-            self.log_fn("Using Ultralytics default tracker behavior (no explicit tracker config).")
+            self.log_fn("Using Ultralytics default tracker behavior (tracker_type: default).")
 
         # Tracking State
         track_smoothers = {} # tid -> Smoother
@@ -164,7 +158,7 @@ class InferencePipeline:
 
         out_data = {
             "mp4_path": self.footage_path,
-            "meta": {"resolution": [real_w, real_h], "fps": real_fps},
+            "meta": {"resolution": [real_w, real_h], "fps": real_fps, "config_name": config_name},
             "location_code": self.loc_code,
             "mp4_frame_count": total_frames,
             "frames": []
@@ -191,49 +185,54 @@ class InferencePipeline:
         if tracker_cfg_path is not None:
             track_kwargs["tracker"] = tracker_cfg_path
 
-        # Pass 1: log all YOLO detections (conf=0.001) without affecting the tracker
+        # Optional diagnostic pass: log all raw detections at low conf for comparison.
+        # Enable via `debug: {conf_log: true}` in the inference config. Off by default.
+        enable_conf_log = full_config.get('debug', {}).get('conf_log', False)
         process_conf = full_config['model']['conf']
-        _all_log_path = os.path.join(out_subdir, f"{Path(footage_name).stem}_conf_all.log")
-        _conf_all = logging.getLogger(f"conf_all_{id(self)}")
-        _conf_all.setLevel(logging.INFO)
-        _conf_all.propagate = False
-        _h_all = logging.FileHandler(_all_log_path, mode="w", encoding="utf-8")
-        _h_all.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-        _conf_all.addHandler(_h_all)
+        _conf_tracked = None
+        _h_tracked = None
+        if enable_conf_log:
+            _all_log_path = os.path.join(out_subdir, f"{Path(footage_name).stem}_conf_all.log")
+            _conf_all = logging.getLogger(f"conf_all_{id(self)}")
+            _conf_all.setLevel(logging.INFO)
+            _conf_all.propagate = False
+            _h_all = logging.FileHandler(_all_log_path, mode="w", encoding="utf-8")
+            _h_all.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            _conf_all.addHandler(_h_all)
 
-        _predict_kwargs = {
-            "source": self.footage_path,
-            "device": full_config['model']['device'],
-            "verbose": False,
-            "stream": True,
-            "conf": 0.02,
-            "iou": full_config['model']['iou'],
-            "imgsz": full_config['model']['imgsz'],
-            "max_det": full_config['model'].get('max_det', 300),
-            "agnostic_nms": full_config['model'].get('agnostic_nms', False),
-            "half": full_config['model'].get('half', False),
-        }
-        for _i, _r in enumerate(model.predict(**_predict_kwargs)):
-            if max_frame > 0 and _i >= max_frame:
-                break
-            _confs = _r.boxes.conf.cpu().numpy()
-            _cls_ids = _r.boxes.cls.cpu().numpy()
-            for _j in range(len(_r.boxes)):
-                _cls = _r.names[int(_cls_ids[_j])]
-                _conf = float(_confs[_j])
-                _tag = " [BELOW_THRESHOLD]" if _conf < process_conf else ""
-                _conf_all.info(f"frame={_i} tid=None cls={_cls} conf={_conf:.4f}{_tag}")
-        _conf_all.removeHandler(_h_all)
-        _h_all.close()
+            _predict_kwargs = {
+                "source": self.footage_path,
+                "device": full_config['model']['device'],
+                "verbose": False,
+                "stream": True,
+                "conf": 0.02,
+                "iou": full_config['model']['iou'],
+                "imgsz": full_config['model']['imgsz'],
+                "max_det": full_config['model'].get('max_det', 300),
+                "agnostic_nms": full_config['model'].get('agnostic_nms', False),
+                "half": full_config['model'].get('half', False),
+            }
+            self.log_fn("Debug: running detection pass for conf logging...")
+            for _i, _r in enumerate(model.predict(**_predict_kwargs)):
+                if max_frame > 0 and _i >= max_frame:
+                    break
+                _confs = _r.boxes.conf.cpu().numpy()
+                _cls_ids = _r.boxes.cls.cpu().numpy()
+                for _j in range(len(_r.boxes)):
+                    _cls = _r.names[int(_cls_ids[_j])]
+                    _conf = float(_confs[_j])
+                    _tag = " [BELOW_THRESHOLD]" if _conf < process_conf else ""
+                    _conf_all.info(f"frame={_i} tid=None cls={_cls} conf={_conf:.4f}{_tag}")
+            _conf_all.removeHandler(_h_all)
+            _h_all.close()
 
-        # Pass 2: tracked log (only objects that enter the pipeline, with tid)
-        _tracked_log_path = os.path.join(out_subdir, f"{Path(footage_name).stem}_conf_tracked.log")
-        _conf_tracked = logging.getLogger(f"conf_tracked_{id(self)}")
-        _conf_tracked.setLevel(logging.INFO)
-        _conf_tracked.propagate = False
-        _h_tracked = logging.FileHandler(_tracked_log_path, mode="w", encoding="utf-8")
-        _h_tracked.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-        _conf_tracked.addHandler(_h_tracked)
+            _tracked_log_path = os.path.join(out_subdir, f"{Path(footage_name).stem}_conf_tracked.log")
+            _conf_tracked = logging.getLogger(f"conf_tracked_{id(self)}")
+            _conf_tracked.setLevel(logging.INFO)
+            _conf_tracked.propagate = False
+            _h_tracked = logging.FileHandler(_tracked_log_path, mode="w", encoding="utf-8")
+            _h_tracked.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            _conf_tracked.addHandler(_h_tracked)
 
         results = model.track(**track_kwargs)
 
@@ -262,7 +261,8 @@ class InferencePipeline:
 
                 # 2. Projection
                 cls_name = r.names[int(cls_ids[j])]
-                _conf_tracked.info(f"frame={i} tid={int(track_ids[j]) if track_ids[j] is not None else None} cls={cls_name} conf={float(confs[j]):.4f}")
+                if _conf_tracked is not None:
+                    _conf_tracked.info(f"frame={i} tid={int(track_ids[j]) if track_ids[j] is not None else None} cls={cls_name} conf={float(confs[j]):.4f}")
                 dims = prior_dims_norm.get(cls_name.strip().lower())
                 have_measurements = (dims is not None)
                 h_real = float(dims.get('height', 0.0)) if have_measurements else 0.0
@@ -289,13 +289,11 @@ class InferencePipeline:
                         
                         # 檢查是否啟用橫向修正且為機車類別
                         lateral_config = kinematics_config.get('lateral_correction', {})
-                        if (lateral_config.get('enabled', False) and 
+                        if (lateral_config.get('enabled', False) and
                             vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
                             track_smoothers[tid] = MotorcycleLateralCorrector(kinematics_config, vehicle_class)
-                            logging.info(f"創建MotorcycleLateralCorrector for 車輛類別: {vehicle_class}, track_id: {tid}")
                         else:
                             track_smoothers[tid] = TrackSmoother(kinematics_config)
-                            logging.info(f"創建標準TrackSmoother for 車輛類別: {vehicle_class}, track_id: {tid}")
                         
                         last_seen_frame[tid] = i - 1
 
@@ -373,8 +371,9 @@ class InferencePipeline:
             self.progress_fn(int((i / frames_to_process) * 100))
 
         cap.release()
-        _conf_tracked.removeHandler(_h_tracked)
-        _h_tracked.close()
+        if _conf_tracked is not None and _h_tracked is not None:
+            _conf_tracked.removeHandler(_h_tracked)
+            _h_tracked.close()
 
         out_data["animation_frame_count"] = i
         out_filename = f"{os.path.splitext(footage_name)[0]}.json.gz"

@@ -125,7 +125,8 @@ class SatRenderer:
                     speed_display_cache[tid] = cache
                     disp_s = cache["val"]
 
-                label_str = f"{cls} {disp_s:.1f}km/h"
+                id_prefix = f"#{tid} " if tid is not None else ""
+                label_str = f"{id_prefix}{cls} {disp_s:.1f}km/h"
                 font = QFont()
                 font.setPointSize(sat_label_size)
                 painter.setFont(font)

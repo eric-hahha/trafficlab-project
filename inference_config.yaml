@@ -19,7 +19,7 @@ configs:
         half: false
 
       tracking:
-        tracker_type: "bytetrack"
+        tracker_type: "default"
         persist: true
         track_high_thresh: 0.25
         track_low_thresh: 0.1
@@ -78,7 +78,7 @@ configs:
       half: true
 
     tracking:
-      tracker_type: "bytetrack"
+      tracker_type: "default"
       persist: true
       track_high_thresh: 0.03
       track_low_thresh: 0.02

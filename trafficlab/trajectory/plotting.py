@@ -138,6 +138,58 @@ class TrajectoryPlotter:
 
         return headings
 
+    def plot_scatter(
+        self,
+        output_path: str | Path,
+        *,
+        title: str | None = None,
+        dpi: int = 200,
+        color: str = "red",
+        point_size: float = 6,
+        alpha: float = 0.5,
+    ) -> Path:
+        """Plot all sat_coords as a scatter — for files without tracked_id."""
+        xs, ys = [], []
+        for frame in self.frames:
+            for obj in frame.get("objects", []):
+                sat_coords = obj.get("sat_coords") or obj.get("sat_coord")
+                if self._valid_point(sat_coords):
+                    xs.append(float(sat_coords[0]))
+                    ys.append(float(sat_coords[1]))
+
+        if not xs:
+            raise ValueError("No valid sat_coords found in file.")
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        ax.imshow(
+            self.satellite_image,
+            extent=[0, self.satellite_image.width, self.satellite_image.height, 0],
+        )
+        ax.scatter(xs, ys, s=point_size, c=color, alpha=alpha,
+                   edgecolors="white", linewidths=0.4)
+        ax.set_xlim(0, self.satellite_image.width)
+        ax.set_ylim(self.satellite_image.height, 0)
+        ax.set_aspect("equal")
+        ax.set_title(title or f"TrafficLab Detection Scatter - {self.location_code}", fontsize=16)
+        ax.set_xlabel("X Coordinate (pixels)", fontsize=12)
+        ax.set_ylabel("Y Coordinate (pixels)", fontsize=12)
+        ax.text(
+            0.02,
+            0.98,
+            f"Total points: {len(xs)}",
+            transform=ax.transAxes,
+            fontsize=11,
+            verticalalignment="top",
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
+        )
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return output_path
+
     def plot(
         self,
         output_path: str | Path,
@@ -195,8 +247,8 @@ class TrajectoryPlotter:
                 marker="o",
                 markersize=4,
                 color=color,
-                markeredgecolor=self._darker_color(color),
-                markeredgewidth=1.0,
+                markeredgecolor="white",
+                markeredgewidth=0.4,
                 alpha=0.92,
             )[0]
 
@@ -230,17 +282,19 @@ class TrajectoryPlotter:
                     heading_rad = self._heading_to_radians(heading)
                     if heading_rad is None:
                         continue
-                    ax.arrow(
-                        point_x,
-                        point_y,
-                        arrow_length * np.cos(heading_rad),
-                        arrow_length * np.sin(heading_rad),
-                        color=color,
-                        width=max(arrow_length * 0.03, 0.5),
-                        head_width=max(arrow_length * 0.18, 3.0),
-                        head_length=max(arrow_length * 0.22, 4.0),
-                        length_includes_head=True,
-                        alpha=0.75,
+                    dx = arrow_length * np.cos(heading_rad)
+                    dy = arrow_length * np.sin(heading_rad)
+                    ax.annotate(
+                        "",
+                        xy=(point_x + dx, point_y + dy),
+                        xytext=(point_x, point_y),
+                        arrowprops=dict(
+                            arrowstyle="->",
+                            color=color,
+                            lw=0.8,
+                            alpha=0.75,
+                            mutation_scale=10,
+                        ),
                         zorder=4,
                     )
 

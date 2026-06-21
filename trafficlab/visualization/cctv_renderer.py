@@ -5,6 +5,17 @@ from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import (QImage, QPixmap, QColor, QPen, QBrush,
                          QPolygonF, QPainter)
 
+# Apollo-24 keypoint group colours (index → QColor)
+_KP_WHEEL  = frozenset([7, 8, 18, 19])
+_KP_ROOF   = frozenset([0, 1, 6, 10, 11, 16])
+_KP_LIGHT  = frozenset([2, 3, 12, 13])
+_KP_COLORS = {
+    **{i: QColor(0, 255, 255)   for i in _KP_WHEEL},   # cyan
+    **{i: QColor(0, 255, 0)     for i in _KP_ROOF},    # lime
+    **{i: QColor(255, 255, 0)   for i in _KP_LIGHT},   # yellow
+}
+_KP_COLOR_OTHER = QColor(180, 180, 180)
+
 
 @functools.lru_cache(maxsize=512)
 def get_color_from_string(s):
@@ -115,11 +126,38 @@ class CCTRenderer:
                             painter.drawEllipse(QPointF(rx, ry), 4, 4)
 
                     if show_label:
+                        conf = obj.get("confidence")
+                        conf_str = f" {conf:.2f}" if conf is not None else ""
+                        lbl_2d = f"{lbl}{conf_str}"
                         painter.setPen(QPen(Qt.white))
                         fm = painter.fontMetrics()
-                        tw, th = fm.width(lbl), fm.height()
+                        tw, th = fm.width(lbl_2d), fm.height()
                         painter.fillRect(QRectF(x1, y1 - th, tw + 4, th), col)
-                        painter.drawText(QPointF(x1 + 2, y1 - 2), lbl)
+                        painter.drawText(QPointF(x1 + 2, y1 - 2), lbl_2d)
+
+            # Keypoints (present in h-aware replay only)
+            kp_cctv = obj.get('kp_cctv')
+            if kp_cctv:
+                painter.setPen(Qt.NoPen)
+                for i, (kx, ky, kc) in enumerate(kp_cctv):
+                    if kc < 0.2 or (kx == 0.0 and ky == 0.0):
+                        continue
+                    kcolor = _KP_COLORS.get(i, _KP_COLOR_OTHER)
+                    painter.setBrush(QBrush(kcolor))
+                    painter.drawEllipse(QPointF(kx, ky), 3, 3)
+
+                # ID label above keypoint cluster (only when no bbox_2d)
+                if show_label and obj.get('bbox_2d') is None:
+                    vis_pts = [(kx, ky) for kx, ky, kc in kp_cctv
+                               if kc >= 0.2 and not (kx == 0.0 and ky == 0.0)]
+                    if vis_pts:
+                        lx = sum(p[0] for p in vis_pts) / len(vis_pts)
+                        ly = min(p[1] for p in vis_pts)
+                        fm = painter.fontMetrics()
+                        tw, th = fm.width(lbl), fm.height()
+                        painter.fillRect(QRectF(lx - tw / 2, ly - th - 2, tw + 4, th), col)
+                        painter.setPen(QPen(Qt.white))
+                        painter.drawText(QPointF(lx - tw / 2 + 2, ly - 4), lbl)
 
         painter.end()
         return pix

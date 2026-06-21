@@ -64,6 +64,20 @@ def add_common_plot_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--title", help="Optional plot title.")
 
 
+def run_scatter(args: argparse.Namespace) -> None:
+    from trafficlab.trajectory import TrajectoryPlotter
+
+    input_path = Path(args.input_path)
+    output = Path(args.output) if args.output else _default_plot_output(input_path, "scatter")
+    plotter = TrajectoryPlotter.from_file(
+        input_path,
+        location_code=args.location_code,
+        satellite_image_path=args.sat_image,
+    )
+    output_path = plotter.plot_scatter(output, title=args.title)
+    print(f"Scatter plot: {output_path}")
+
+
 def run_smooth(args: argparse.Namespace) -> None:
     from trafficlab.trajectory import smooth_file
 
@@ -153,6 +167,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Smooth and plot TrafficLab replay trajectories without mixing external scripts."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    scatter = subparsers.add_parser("scatter", help="Scatter-plot all sat_coords (for files without tracked_id).")
+    scatter.add_argument("input_path", help="Input .json or .json.gz replay file.")
+    scatter.add_argument("-o", "--output", help="Output PNG path.")
+    scatter.add_argument("--location-code", help="Override inferred location code.")
+    scatter.add_argument("--sat-image", help="Explicit satellite image path.")
+    scatter.add_argument("--title", help="Optional plot title.")
+    scatter.set_defaults(func=run_scatter)
 
     smooth = subparsers.add_parser("smooth", help="Smooth sat_coords in a replay JSON file.")
     smooth.add_argument("input_path", help="Input .json or .json.gz replay file.")

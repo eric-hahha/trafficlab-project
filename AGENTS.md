@@ -118,6 +118,51 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_F
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
 ```
 
+### OpenPifPaf wheel detection scatter plot
+
+Plot all OpenPifPaf-detected wheel positions projected onto the satellite image (no YOLO, no tracking):
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/eval_pifpaf_sat.py \
+  --video location/test21/footage/test21-2.mp4 \
+  --g-proj location/test21/G_projection_test21.json \
+  --out /private/tmp/sat_scatter.png \
+  --frames 100
+```
+
+Options: `--checkpoint` (default `shufflenetv2k16-apollo-24`), `--kp-conf` (default `0.2`), `--frames` (default `-1` = all).
+
+### H-aware 3D keypoint localization
+
+Run OpenPifPaf Apollo-24 detection on every frame and localize each vehicle via
+height-aware keypoint template matching. Output is a standard TrafficLab replay
+JSON loadable in the GUI (satellite position, heading, footprint, and CCTV
+keypoint overlay).
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \
+  --video location/test21/footage/test21-4.mp4 \
+  --g-proj location/test21/G_projection_test21.json
+```
+
+Output: `output/haware/<location_code>/<video_stem>.json.gz`
+
+Options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--checkpoint` | `shufflenetv2k16-apollo-24` | PifPaf model |
+| `--spec-csv` | *(none)* | `engines.csv` from automobile-models-and-specs; falls back to `prior_dimensions.json` then built-in defaults |
+| `--body-type` | `Sedan` | Used with `--spec-csv` |
+| `--kp-conf` | `0.2` | Keypoint confidence threshold |
+| `--frames` | `-1` (all) | Limit frames for quick tests |
+| `--out` | auto | Override output path |
+
+Per-object fields added beyond the standard 14: `kp_cctv` (raw `[x, y, conf] × 24`
+for GUI overlay), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
+`failed_insufficient_kp`).
+
 ### Trajectory smoothing and plotting
 
 The integrated trajectory tools live in `trafficlab/trajectory/` and are exposed
@@ -239,14 +284,14 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && python -m py_compile
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
 ```
 
-- For trajectory changes, prefer a small disposable smoke test that writes to `/private/tmp`.
+- For trajectory changes, omit `-o` / `--output` / `--plot-output` so outputs land next to the input JSON by default. Only redirect to `/private/tmp` for pure syntax/smoke tests that produce no meaningful artifact.
 - For inference changes, use the same config name, mp4, environment, and working directory when comparing GUI and CLI behavior.
 - For GUI changes, launch with MPS fallback when inference may be touched.
 
 ## Generated Files and Git Hygiene
 
 - Do not commit or intentionally add `__pycache__/`, `.pyc`, `.DS_Store`, temporary plots, or throwaway JSON outputs.
-- Prefer `/private/tmp` for smoke-test artifacts.
+- Prefer `/private/tmp` only for pure smoke-test artifacts (syntax checks, throwaway outputs). Trajectory plot and smooth outputs should use the default path next to the input JSON.
 - Generated inference outputs belong under `output/` only when the user wants to keep them.
 - Before reporting completion, check `git status --short` and distinguish your changes from pre-existing user changes.
 - Never revert unrelated user changes.
