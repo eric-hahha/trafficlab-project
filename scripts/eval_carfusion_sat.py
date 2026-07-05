@@ -10,7 +10,7 @@ Usage:
     source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
     python scripts/eval_carfusion_sat.py \\
         --video location/test21/footage/test21-4.mp4 \\
-        --weights /private/tmp/carfusion_weights/weights/last.pt \\
+        --weights models/carfusion_last.pt \\
         --g-proj  location/test21/G_projection_test21.json \\
         --sat     location/test21/sat_test21.png \\
         --out     /private/tmp/carfusion_sat/ \\
@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import colorsys
 import json
 import math
 import os
@@ -48,6 +49,24 @@ _C_BOX     = (200, 200,   0)    # cyan    – YOLO bbox
 _C_SAT_DOT = (0,   255, 255)    # yellow  – localized centre on sat
 _C_ARROW   = (255, 200,   0)    # yellow-blue – heading arrow
 _C_KP_SAT  = (180, 180, 180)    # grey    – individual kp projections on sat
+_C_BOX_NONE = _C_BOX             # fallback colour for untracked (tid=None) boxes
+
+
+def _id_color_rgb01(tid) -> tuple:
+    """Deterministic distinct RGB (0-1 floats) colour per track id (golden-ratio hue spacing).
+    Shared by the cv2 (BGR) and matplotlib (RGB) renderers so the same id looks the same colour
+    in both the CCTV bbox overlay and the sat scatter plot."""
+    if tid is None:
+        b, g, r = _C_BOX_NONE
+        return (r / 255, g / 255, b / 255)
+    hue = (tid * 0.6180339887) % 1.0
+    return colorsys.hsv_to_rgb(hue, 0.85, 0.95)
+
+
+def _id_color(tid) -> tuple:
+    """Deterministic distinct BGR colour per track id, for cv2 drawing."""
+    r, g, b = _id_color_rgb01(tid)
+    return (int(b * 255), int(g * 255), int(r * 255))
 
 
 def _kp_color(name: str) -> tuple:
@@ -81,12 +100,13 @@ def _load_dims(g_proj_dir: str) -> dict:
 
 
 def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
-                  conf_thresh: float, kp_conf: float):
+                  conf_thresh: float, kp_conf: float, tracker: str):
     H_sat, W_sat = sat_img.shape[:2]
     cctv_vis = frame.copy()
     sat_vis  = sat_img.copy()
 
-    results = yolo_model(frame, conf=conf_thresh, verbose=False)
+    results = yolo_model.track(frame, conf=conf_thresh, persist=True,
+                                tracker=tracker, verbose=False)
     result  = results[0]
 
     n_vehicles = 0
@@ -95,12 +115,15 @@ def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
     det_records    = []
 
     if result.keypoints is not None and result.boxes is not None and len(result.boxes) > 0:
+        track_ids = result.boxes.id
         for i in range(len(result.boxes)):
             n_vehicles += 1
+            tid = int(track_ids[i]) if track_ids is not None else None
             box_conf = float(result.boxes.conf[i])
             x1, y1, x2, y2 = [int(v) for v in result.boxes.xyxy[i]]
+            box_color = _id_color(tid)
 
-            cv2.rectangle(cctv_vis, (x1, y1), (x2, y2), _C_BOX, 1)
+            cv2.rectangle(cctv_vis, (x1, y1), (x2, y2), box_color, 1)
 
             kp_xy   = result.keypoints.xy[i].cpu().numpy()    # (14, 2)
             kp_conf_arr = result.keypoints.conf[i].cpu().numpy()  # (14,)
@@ -126,9 +149,9 @@ def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
                 n_fail += 1
 
             # Status label above bbox
-            label = f"{res.status[:3]} kp={res.n_keypoints} c={res.confidence:.2f}"
+            label = f"id={tid} {res.status[:3]} kp={res.n_keypoints} c={res.confidence:.2f}"
             cv2.putText(cctv_vis, label, (x1, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, _C_BOX, 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, box_color, 1)
 
             # SAT view: individual kp projections
             for kp_idx, (sx, sy) in res.kp_sat.items():
@@ -141,12 +164,13 @@ def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
                 sx = int(np.clip(res.sat_coords[0], 0, W_sat - 1))
                 sy = int(np.clip(res.sat_coords[1], 0, H_sat - 1))
                 cv2.circle(sat_vis, (sx, sy), 6, _C_SAT_DOT, -1)
-                sat_coords_out.append((res.sat_coords, res.heading))
+                sat_coords_out.append((res.sat_coords, res.heading, tid))
                 if res.heading is not None:
                     _draw_arrow(sat_vis, sx, sy, res.heading)
 
             det_records.append({
                 'class':       'Car',
+                'tracked_id':  tid,
                 'sat_coords':  list(res.sat_coords) if res.sat_coords is not None else None,
                 'sat_center':  list(res.sat_coords) if res.sat_coords is not None else None,
                 'heading':     res.heading,
@@ -164,7 +188,7 @@ def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
 
 
 def _save_scatter(sat_img, all_detections: list, out_path: str):
-    """all_detections: list of (sat_coords, heading_deg_or_None)"""
+    """all_detections: list of (sat_coords, heading_deg_or_None, tracked_id_or_None)"""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -174,15 +198,16 @@ def _save_scatter(sat_img, all_detections: list, out_path: str):
 
     fig, ax = plt.subplots(figsize=(W / 100, H / 100), dpi=100)
     ax.imshow(cv2.cvtColor(sat_img, cv2.COLOR_BGR2RGB))
-    for coords, heading in all_detections:
+    for coords, heading, tid in all_detections:
         x, y = coords
-        ax.scatter(x, y, s=8, c='yellow', linewidths=0.4,
+        color = _id_color_rgb01(tid)
+        ax.scatter(x, y, s=8, color=color, linewidths=0.4,
                    edgecolors='black', alpha=0.8, zorder=3)
         if heading is not None:
             dx =  math.cos(math.radians(heading)) * arrow_len
             dy = -math.sin(math.radians(heading)) * arrow_len
             ax.annotate('', xy=(x + dx, y + dy), xytext=(x, y),
-                        arrowprops=dict(arrowstyle='->', color='red',
+                        arrowprops=dict(arrowstyle='->', color=color,
                                         lw=0.8, mutation_scale=6),
                         zorder=4)
     ax.set_xlim(0, W)
@@ -197,7 +222,7 @@ def _save_scatter(sat_img, all_detections: list, out_path: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--video',       default='location/test21/footage/test21-4.mp4')
-    ap.add_argument('--weights',     default='/private/tmp/carfusion_weights/weights/last.pt')
+    ap.add_argument('--weights',     default='models/carfusion_last.pt')
     ap.add_argument('--g-proj',      default='location/test21/G_projection_test21.json')
     ap.add_argument('--sat',         default='location/test21/sat_test21.png')
     ap.add_argument('--out',         default='/private/tmp/carfusion_sat/')
@@ -207,6 +232,8 @@ def main():
                     help='Max frames to process after start-frame (-1 = all)')
     ap.add_argument('--conf',        type=float, default=0.25)
     ap.add_argument('--kp-conf',     type=float, default=0.2)
+    ap.add_argument('--tracker',     default='trafficlab/inference/bytetrack.yaml',
+                    help='Ultralytics tracker config (default: pinned project copy)')
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -248,7 +275,6 @@ def main():
     agg = {'n_vehicles': 0, 'n_ok': 0, 'n_amb': 0, 'n_fail': 0, 'frames_with_det': 0}
     all_detections = []
     replay_frames  = []
-    det_id         = 1
     frame_idx = args.start_frame
     processed = 0
     limit = args.frames if args.frames > 0 else 99999
@@ -260,13 +286,10 @@ def main():
 
         cctv_vis, sat_vis, stats, sat_coords, det_records = process_frame(
             frame, sat_img.copy(), g_engine, yolo_model, localizer,
-            conf_thresh=args.conf, kp_conf=args.kp_conf,
+            conf_thresh=args.conf, kp_conf=args.kp_conf, tracker=args.tracker,
         )
         all_detections.extend(sat_coords)
 
-        for rec in det_records:
-            rec['tracked_id'] = det_id
-            det_id += 1
         replay_frames.append({'frame_index': frame_idx, 'objects': det_records})
 
         # Overlay frame index

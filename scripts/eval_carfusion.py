@@ -8,7 +8,7 @@ Runs the Habib0905/Vehicle-Pose-Estimation model and produces:
 Usage:
     python scripts/eval_carfusion.py \
         --video location/test21/footage/test21-3sf.mp4 \
-        --weights /private/tmp/carfusion_weights/weights/last.pt \
+        --weights models/carfusion_last.pt \
         --frames 40 \
         --out /private/tmp/carfusion_eval/
 """
