@@ -84,6 +84,29 @@ def _draw_arrow(img, cx, cy, heading_deg, length=30, color=_C_ARROW, thickness=2
     cv2.arrowedLine(img, (int(cx), int(cy)), (ex, ey), color, thickness, tipLength=0.35)
 
 
+def _location_code_from_gproj(g_proj_path: str) -> str:
+    """location/{loc}/G_projection_{loc}.json -> {loc}, matching the convention
+    trafficlab/gui/tabs/tab_visualization.py uses to locate the G-projection file."""
+    return os.path.basename(os.path.dirname(os.path.abspath(g_proj_path)))
+
+
+def _floor_and_3d_box(sat_coords, heading, dims: dict, px_per_m: float, g_engine):
+    """Same rotated-floor-box + CCTV-3D-box lift as trafficlab/inference/pipeline.py.
+    Returns (sat_floor_box, bbox_3d), both None if heading/position is unknown."""
+    if sat_coords is None or heading is None:
+        return None, None
+    w_m, l_m = dims['width'], dims['length']
+    h_real = dims['height']
+    ang = math.radians(heading)
+    c, s = math.cos(ang), math.sin(ang)
+    dx, dy = (l_m * px_per_m) / 2, (w_m * px_per_m) / 2
+    corners = np.array([[dx, dy], [dx, -dy], [-dx, -dy], [-dx, dy]])
+    R = np.array([[c, -s], [s, c]])
+    sat_floor_box = (corners @ R.T + np.array(sat_coords)).tolist()
+    bbox_3d = g_engine.sat_floor_to_cctv_3d(sat_floor_box, h_real)
+    return sat_floor_box, bbox_3d
+
+
 def _load_dims(g_proj_dir: str) -> dict:
     d = g_proj_dir
     for _ in range(5):
@@ -99,7 +122,7 @@ def _load_dims(g_proj_dir: str) -> dict:
     return dict(_FALLBACK_DIMS)
 
 
-def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
+def process_frame(frame, sat_img, g_engine, yolo_model, localizer, dims: dict,
                   conf_thresh: float, kp_conf: float, tracker: str):
     H_sat, W_sat = sat_img.shape[:2]
     cctv_vis = frame.copy()
@@ -168,18 +191,27 @@ def process_frame(frame, sat_img, g_engine, yolo_model, localizer,
                 if res.heading is not None:
                     _draw_arrow(sat_vis, sx, sy, res.heading)
 
+            have_heading = res.heading is not None
+            sat_floor_box, bbox_3d = _floor_and_3d_box(
+                res.sat_coords, res.heading, dims, g_engine.px_per_m, g_engine)
+
             det_records.append({
-                'class':       'Car',
-                'tracked_id':  tid,
-                'sat_coords':  list(res.sat_coords) if res.sat_coords is not None else None,
-                'sat_center':  list(res.sat_coords) if res.sat_coords is not None else None,
-                'heading':     res.heading,
-                'confidence':  round(res.confidence, 4),
-                'n_keypoints': res.n_keypoints,
-                'status':      res.status,
-                'bbox_cctv':   [x1, y1, x2, y2],
-                'bbox_conf':   round(box_conf, 4),
-                'kp_cctv':     kp_14.tolist(),
+                'class':             'Car',
+                'tracked_id':        tid,
+                'sat_coords':        list(res.sat_coords) if res.sat_coords is not None else None,
+                'sat_center':        list(res.sat_coords) if res.sat_coords is not None else None,
+                'heading':           res.heading,
+                'confidence':        round(res.confidence, 4),
+                'n_keypoints':       res.n_keypoints,
+                'status':            res.status,
+                'bbox_cctv':         [x1, y1, x2, y2],
+                'bbox_2d':           [x1, y1, x2, y2],
+                'bbox_conf':         round(box_conf, 4),
+                'kp_cctv':           kp_14.tolist(),
+                'have_heading':      have_heading,
+                'have_measurements': True,
+                'sat_floor_box':     sat_floor_box,
+                'bbox_3d':           bbox_3d,
             })
 
     return cctv_vis, sat_vis, {
@@ -258,8 +290,13 @@ def main():
 
     cap   = cv2.VideoCapture(args.video)
     fps   = cap.get(cv2.CAP_PROP_FPS)
+    vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Count actual readable frames (CAP_PROP_FRAME_COUNT is unreliable for some codecs)
+    # CAP_PROP_FRAME_COUNT can misreport for some codecs; mp4_frame_count below still
+    # uses it (matches every other script in this repo), but animation_frame_count
+    # is derived from the main loop's actual last-processed frame index instead,
+    # same pattern as trafficlab/inference/pipeline.py's animation_frame_count.
     actual_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f'Video: ~{actual_total} frames @ {fps:.1f} fps')
     print(f'Processing from frame {args.start_frame} to end')
@@ -285,7 +322,7 @@ def main():
             break
 
         cctv_vis, sat_vis, stats, sat_coords, det_records = process_frame(
-            frame, sat_img.copy(), g_engine, yolo_model, localizer,
+            frame, sat_img.copy(), g_engine, yolo_model, localizer, dims,
             conf_thresh=args.conf, kp_conf=args.kp_conf, tracker=args.tracker,
         )
         all_detections.extend(sat_coords)
@@ -334,8 +371,16 @@ def main():
     _save_scatter(sat_img, all_detections, scatter_path)
 
     json_path = os.path.join(args.out, 'detections.json')
+    out_data = {
+        'mp4_path':              os.path.abspath(args.video),
+        'meta':                  {'resolution': [vid_w, vid_h], 'fps': fps},
+        'location_code':         _location_code_from_gproj(args.g_proj),
+        'mp4_frame_count':       actual_total,
+        'animation_frame_count': replay_frames[-1]['frame_index'] if replay_frames else 0,
+        'frames':                replay_frames,
+    }
     with open(json_path, 'w') as f:
-        json.dump({'frames': replay_frames}, f)
+        json.dump(out_data, f)
     print(f'Detections JSON: {json_path}')
 
 
