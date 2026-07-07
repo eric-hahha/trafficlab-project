@@ -97,7 +97,10 @@ def _floor_and_3d_box(sat_coords, heading, dims: dict, px_per_m: float, g_engine
         return None, None
     w_m, l_m = dims['width'], dims['length']
     h_real = dims['height']
-    ang = math.radians(heading)
+    # CarFusion's heading convention is 90=North(screen-up); pipeline.py's rotation
+    # below assumes the unflipped 90=screen-down convention (matches kinematics.py's
+    # atan2(dy,dx)). Negate to convert, same flip _draw_arrow() applies when drawing.
+    ang = math.radians(-heading)
     c, s = math.cos(ang), math.sin(ang)
     dx, dy = (l_m * px_per_m) / 2, (w_m * px_per_m) / 2
     corners = np.array([[dx, dy], [dx, -dy], [-dx, -dy], [-dx, dy]])
