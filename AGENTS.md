@@ -60,6 +60,8 @@ or notebooks into runtime packages.
 PYTHONPATH=/Users/eric/code/TrafficLab-3D-main
 ```
 
+- Exception: `scripts/run_inference.py` does not add the repository root to `sys.path`, so running it by path (`python scripts/run_inference.py`) raises `ModuleNotFoundError: No module named 'trafficlab'` even with `cwd` at the repository root and the `trafficlab` environment active. Always set `PYTHONPATH` explicitly when invoking it — see the commands under "Run inference without the GUI" below.
+
 - For regular Python scripts:
 
 ```bash
@@ -91,25 +93,25 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_F
 Process all pending videos with a chosen config:
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name car_heading_smooth --all-pending
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --all-pending
 ```
 
 Process one location:
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name car_heading_smooth --location test1
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --location test1
 ```
 
 Process one mp4:
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name car_heading_smooth --mp4 location/test1/footage/test1_8_100_s.mp4
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --mp4 location/test1/footage/test1_8_100_s.mp4
 ```
 
 Force re-run even if output already exists:
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name car_heading_smooth --location test1 --force
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --location test1 --force
 ```
 
 ### Postprocess
@@ -299,7 +301,7 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/traje
 ## Agent Expectations
 
 - If you need to run Python code, activate `trafficlab` and then use `python ...`.
-- If you need to run inference, activate `trafficlab` and then use `PYTORCH_ENABLE_MPS_FALLBACK=1 python ...`.
+- If you need to run inference, activate `trafficlab` and then use `PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python ...`.
 - If you compare GUI behavior and CLI behavior, keep the config name, mp4, environment, and working directory the same before drawing conclusions.
 - Do not blame `half: true` for a failure unless the command has already reached actual inference/model execution and the error is consistent with FP16 or MPS backend issues.
 - Keep README user-facing and concise. Put agent-only operational details here in `AGENTS.md`.
