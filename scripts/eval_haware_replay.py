@@ -348,7 +348,13 @@ def main():
                   f'ok={n_ok} ambig={n_ambig} fail={n_fail}')
 
     cap.release()
-    out_data['animation_frame_count'] = limit
+    # Not `limit`: that's the pre-computed cap (possibly from an unreliable
+    # CAP_PROP_FRAME_COUNT), not how far the loop actually got before a failed
+    # cap.read() broke it early. Read back the last frame actually recorded instead,
+    # same pattern as eval_carfusion_sat.py's animation_frame_count.
+    out_data['animation_frame_count'] = (
+        out_data['frames'][-1]['frame_index'] if out_data['frames'] else 0
+    )
 
     ReplayWriter.write(out_path, out_data)
 
