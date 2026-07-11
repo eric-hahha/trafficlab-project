@@ -67,7 +67,12 @@ def _kp_bbox_xyxy(kp_24: np.ndarray, kp_conf: float):
 
 
 def _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=0.3):
-    """Match each PifPaf bbox to the best-IoU YOLO bbox; return list of track IDs."""
+    """Match each PifPaf bbox to the best-IoU YOLO bbox.
+
+    Returns (tracked_ids, matched_boxes): parallel lists, one entry per PifPaf
+    box. matched_boxes holds the assigned YOLO bbox (xyxy) or None when
+    nothing cleared iou_threshold.
+    """
     def _iou(a, b):
         if a is None or b is None:
             return 0.0
@@ -79,15 +84,16 @@ def _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=0.3):
         ua = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
         return inter / ua if ua > 0 else 0.0
 
-    result = []
+    tracked_ids, matched_boxes = [], []
     for pb in pifpaf_boxes:
-        best_tid, best_iou = None, iou_threshold
+        best_tid, best_box, best_iou = None, None, iou_threshold
         for yb, yt in zip(yolo_boxes, yolo_tids):
             v = _iou(pb, yb)
             if v > best_iou:
-                best_iou, best_tid = v, yt
-        result.append(best_tid)
-    return result
+                best_iou, best_tid, best_box = v, yt, yb
+        tracked_ids.append(best_tid)
+        matched_boxes.append(best_box)
+    return tracked_ids, matched_boxes
 
 
 def _extract_yolo(results) -> tuple:
@@ -118,23 +124,24 @@ def main():
     parser.add_argument('--body-type',  default='Sedan')
     parser.add_argument('--kp-conf',    type=float, default=0.2)
     parser.add_argument('--frames',          type=int,   default=-1,  help='-1 = all')
-    parser.add_argument('--pifpaf-threshold', type=float, default=0.2,
-                        help='PifPaf instance score threshold (default 0.2)')
-    parser.add_argument('--seed-threshold',   type=float, default=0.2,
-                        help='PifPaf CIF seed threshold (default 0.2)')
+    parser.add_argument('--pifpaf-threshold', type=float, default=0.01,
+                        help='PifPaf instance score threshold (default 0.01)')
+    parser.add_argument('--seed-threshold',   type=float, default=0.01,
+                        help='PifPaf CIF seed threshold (default 0.01)')
     parser.add_argument('--two-pass',  action='store_true',
                         help='Crop each Pass-1 bbox with 50%% padding and re-run PifPaf')
     parser.add_argument('--crop-padding', type=float, default=0.5,
                         help='Fractional padding around bbox for two-pass crop (default 0.5)')
-    # Method-B: optional YOLO track-ID matching
-    parser.add_argument('--yolo',          default=None,
-                        help='YOLO model path/name for track-ID matching (e.g. yolov8n.pt); '
-                             'omit to leave tracked_id=None')
+    # Method-B: YOLO track-ID matching (on by default via ByteTrack)
+    parser.add_argument('--yolo',          default='models/best.pt',
+                        help='YOLO model path/name for track-ID matching (default: models/best.pt, '
+                             'ByteTrack tracker); pass --yolo "" to disable and leave tracked_id=None')
     parser.add_argument('--yolo-conf',     type=float, default=0.25,
                         help='YOLO detection confidence threshold (default 0.25)')
     parser.add_argument('--yolo-classes',  default=None,
-                        help='Comma-separated YOLO class indices to keep, e.g. "2" for car '
-                             'in yolo11s-visdrone-v2-ft.pt (default: all classes)')
+                        help='Comma-separated YOLO class indices to keep, e.g. "3" for car '
+                             'in models/best.pt — class indices are model-specific, check '
+                             '--yolo model.names (default: all classes)')
     parser.add_argument('--iou-threshold', type=float, default=0.3,
                         help='Minimum bbox IoU to accept a PifPaf↔YOLO match (default 0.3)')
     args = parser.parse_args()
@@ -250,9 +257,11 @@ def main():
 
         # --- Method-B: YOLO tracking (unconditional) + IoU matching ---
         tracked_ids = [None] * len(predictions)
+        bbox_2d_list = [None] * len(predictions)
         if yolo_model is not None:
             yolo_res = yolo_model.track(frame, persist=True, conf=args.yolo_conf,
-                                        classes=yolo_classes, verbose=False)
+                                        classes=yolo_classes, tracker='bytetrack.yaml',
+                                        verbose=False)
             yolo_boxes, yolo_tids = _extract_yolo(yolo_res)
             n_yolo_det += len(yolo_boxes)
             if yolo_boxes:
@@ -264,8 +273,8 @@ def main():
                 n_frames_pifpaf_fewer += 1
             if predictions:
                 pifpaf_boxes = [_kp_bbox_xyxy(ann.data, args.kp_conf) for ann in predictions]
-                tracked_ids = _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids,
-                                                 iou_threshold=args.iou_threshold)
+                tracked_ids, matched_boxes = _match_by_bbox_iou(
+                    pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=args.iou_threshold)
                 n_matched += sum(1 for t in tracked_ids if t is not None)
                 matched_this_frame = set(t for t in tracked_ids if t is not None)
                 for t in matched_this_frame:
@@ -273,6 +282,20 @@ def main():
                 for yt in set(yt for yt in yolo_tids if yt is not None):
                     if yt not in matched_this_frame:
                         no_match_tid_frames[yt] = no_match_tid_frames.get(yt, 0) + 1
+
+                # bbox_2d: the matched YOLO box when there is one; otherwise
+                # fall back to the PifPaf-keypoint box (no YOLO box to borrow).
+                bbox_2d_list = [mb if mb is not None else pb
+                                for mb, pb in zip(matched_boxes, pifpaf_boxes)]
+
+                # Detections that didn't clear the IoU threshold keep their own
+                # PifPaf per-frame instance index as an id (offset by 500 to
+                # stay clear of real YOLO track IDs), so they stay
+                # colour-distinguishable downstream. This is NOT a real track:
+                # the offset index has no meaning from one frame to the next.
+                for j in range(len(tracked_ids)):
+                    if tracked_ids[j] is None:
+                        tracked_ids[j] = j + 500
             else:
                 # True no-PifPaf frames: YOLO ran but PifPaf found nothing
                 for yt in set(yt for yt in yolo_tids if yt is not None):
@@ -324,7 +347,7 @@ def main():
                 'tracked_id':       tracked_ids[j],
                 'class':            'car',
                 'confidence':       result.confidence,
-                'bbox_2d':          None,
+                'bbox_2d':          list(bbox_2d_list[j]) if bbox_2d_list[j] is not None else None,
                 'reference_point':  None,
                 'sat_coords':       sat_coords,
                 'have_heading':     have_heading,
@@ -351,19 +374,21 @@ def main():
     # Not `limit`: that's the pre-computed cap (possibly from an unreliable
     # CAP_PROP_FRAME_COUNT), not how far the loop actually got before a failed
     # cap.read() broke it early. Read back the last frame actually recorded instead,
-    # same pattern as eval_carfusion_sat.py's animation_frame_count.
+    # same pattern as pipeline.py's animation_frame_count (= the loop's actual
+    # last index, not the pre-computed frames_to_process cap).
+    n_frames_processed = len(out_data['frames'])
     out_data['animation_frame_count'] = (
         out_data['frames'][-1]['frame_index'] if out_data['frames'] else 0
     )
 
     ReplayWriter.write(out_path, out_data)
 
-    print(f'\nDone: {limit} frames, {n_det} detections')
+    print(f'\nDone: {n_frames_processed} frames, {n_det} detections')
     print(f'  ok={n_ok}  ambiguous={n_ambig}  failed={n_fail}')
     if yolo_model is not None:
         pct = 100 * n_matched / n_det if n_det > 0 else 0.0
-        print(f'  YOLO frames:      {n_yolo_frames}/{limit}  detections: {n_yolo_det}')
-        print(f'  PifPaf < YOLO 幀: {n_frames_pifpaf_fewer}/{limit}')
+        print(f'  YOLO frames:      {n_yolo_frames}/{n_frames_processed}  detections: {n_yolo_det}')
+        print(f'  PifPaf < YOLO 幀: {n_frames_pifpaf_fewer}/{n_frames_processed}')
         print(f'  track-ID matched: {n_matched}/{n_det} ({pct:.1f}%)')
         if yolo_tid_frames:
             print(f'\n  {"ID":>4}  {"YOLO幀":>6}  {"配對幀":>6}  {"無PifPaf":>8}  {"IoU失敗":>7}  {"配對率":>6}')
