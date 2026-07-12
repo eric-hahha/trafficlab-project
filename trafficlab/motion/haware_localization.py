@@ -201,8 +201,15 @@ class HawareLocalizer:
       1. For each confident keypoint, lift to sat coords using its template height h_i.
       2. If n < 2 detections, return failure.
       3. Fixed-scale 2D Procrustes (SVD) on template (x,z) vs observed sat (x,y).
-      4. Output vehicle centre T and heading θ.
+      4. Re-solve the same fit with the template's front/rear axis flipped;
+         trust the heading only when the as-labeled fit clearly beats the
+         flipped one (see _AMBIGUITY_RMS_RATIO), else 'ambiguous_heading'.
+      5. Output vehicle centre T and heading θ.
     """
+
+    # As-labeled fit must beat the front/rear-flipped fit by at least this
+    # margin (as-labeled rms < ratio * flipped rms) to be trusted as 'ok'.
+    _AMBIGUITY_RMS_RATIO = 0.7
 
     def __init__(self, g_engine, template_3d: np.ndarray, kp_conf: float = 0.2):
         self.g_engine = g_engine
@@ -251,17 +258,34 @@ class HawareLocalizer:
         # Project convention (_sat_heading in wheel_localization.py): atan2(−dy, dx)
         heading = math.degrees(math.atan2(R[1, 1], -R[0, 1])) % 360.0
 
-        # Step 4 — ambiguity: all detected kps on the same longitudinal side?
-        z_vals = self.template[idx, 2]
-        symmetric = bool(np.all(z_vals >= 0) or np.all(z_vals <= 0))
-        status = 'ambiguous_heading' if symmetric else 'ok'
-        if symmetric:
-            heading = None
-
-        # Step 5 — confidence heuristic
+        # Step 4 — fit error for the as-labeled hypothesis
         P_pred = (Q - qb) @ R.T + pb
         rms    = float(np.sqrt(np.mean(np.sum((P - P_pred) ** 2, axis=1))))
-        conf   = min(1.0, n / 8.0) * max(0.0, 1.0 - rms / (5.0 * s))
+
+        # Step 5 — ambiguity: re-solve the same Procrustes fit with the
+        # template's longitudinal (z) axis negated — i.e. "what if these
+        # keypoints actually belong to the opposite end of the car" — and
+        # compare fit error. Trust the as-labeled heading only when it fits
+        # distinctly better; too close to call -> ambiguous. Replaces the
+        # old "all detected keypoints on the same side" geometric check,
+        # which discarded any same-side case regardless of how well it fit.
+        Q_flip = Q.copy()
+        Q_flip[:, 1] *= -1
+        qb_flip = Q_flip.mean(0)
+        Hc_flip = (Q_flip - qb_flip).T @ (P - pb)
+        U_f, _, Vt_f = np.linalg.svd(Hc_flip)
+        det_sign_f = float(np.sign(np.linalg.det(Vt_f.T @ U_f.T)))
+        R_flip = Vt_f.T @ np.diag([1.0, det_sign_f]) @ U_f.T
+        P_pred_flip = (Q_flip - qb_flip) @ R_flip.T + pb
+        rms_flip = float(np.sqrt(np.mean(np.sum((P - P_pred_flip) ** 2, axis=1))))
+
+        ambiguous = rms >= self._AMBIGUITY_RMS_RATIO * rms_flip
+        status = 'ambiguous_heading' if ambiguous else 'ok'
+        if ambiguous:
+            heading = None
+
+        # Step 6 — confidence heuristic
+        conf = min(1.0, n / 8.0) * max(0.0, 1.0 - rms / (5.0 * s))
 
         return HawareResult(
             sat_coords=tuple(T_sat),
