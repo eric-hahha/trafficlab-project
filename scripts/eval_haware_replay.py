@@ -4,16 +4,21 @@ Run h-aware 3D keypoint localization and output a TrafficLab replay JSON.
 Identical detection loop to eval_haware.py, but writes a .json.gz in the
 standard TrafficLab replay format so results can be loaded in the GUI.
 
+--method selects one of two mutually exclusive per-frame strategies:
+    geometric  Bridge PifPaf detections to YOLO track IDs via bbox IoU.
+               Reads --yolo / --yolo-classes / --yolo-conf / --iou-threshold.
+    crop       Crop each Pass-1 bbox and re-run PifPaf on the crop to recover
+               more confident keypoints. Reads --crop-redetect / --crop-padding.
+Both strategies' own flags keep their existing meaning and defaults; --method
+only decides which one actually runs this invocation.
+
 Usage:
     source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
     PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \\
         --video location/test21/footage/test21-4.mp4 \\
         --g-proj location/test21/G_projection_test21.json \\
+        --method geometric \\
         --spec-csv /tmp/autospec/engines.csv
-
-Method-B track-ID matching (optional):
-    Add --yolo <model_path> to run YOLO tracker alongside PifPaf and assign
-    YOLO track IDs to h-aware detections via bbox IoU.
 """
 import argparse
 import json
@@ -128,11 +133,18 @@ def main():
                         help='PifPaf instance score threshold (default 0.01)')
     parser.add_argument('--seed-threshold',   type=float, default=0.01,
                         help='PifPaf CIF seed threshold (default 0.01)')
-    parser.add_argument('--two-pass',  action='store_true',
-                        help='Crop each Pass-1 bbox with 50%% padding and re-run PifPaf')
+    parser.add_argument('--method', required=True, choices=['geometric', 'crop'],
+                        help='geometric = bridge to YOLO track IDs via bbox IoU '
+                             '(reads --yolo*/--iou-threshold); '
+                             'crop = crop-and-redetect for better keypoints '
+                             '(reads --crop-redetect/--crop-padding). Mutually exclusive: '
+                             'only the selected strategy runs.')
+    parser.add_argument('--crop-redetect', action='store_true',
+                        help='Crop each Pass-1 bbox with 50%% padding and re-run PifPaf '
+                             '(only takes effect when --method crop)')
     parser.add_argument('--crop-padding', type=float, default=0.5,
-                        help='Fractional padding around bbox for two-pass crop (default 0.5)')
-    # Method-B: YOLO track-ID matching (on by default via ByteTrack)
+                        help='Fractional padding around bbox for crop-and-redetect crop (default 0.5)')
+    # geometric matching: YOLO track-ID matching (only when --method geometric)
     parser.add_argument('--yolo',          default='models/best.pt',
                         help='YOLO model path/name for track-ID matching (default: models/best.pt, '
                              'ByteTrack tracker); pass --yolo "" to disable and leave tracked_id=None')
@@ -145,6 +157,13 @@ def main():
     parser.add_argument('--iou-threshold', type=float, default=0.3,
                         help='Minimum bbox IoU to accept a PifPaf↔YOLO match (default 0.3)')
     args = parser.parse_args()
+
+    if args.method == 'geometric' and not args.yolo:
+        print('[haware] --method geometric but --yolo is empty: no track-ID matching '
+              'will happen, tracked_id will be null for every detection.')
+    if args.method == 'crop' and not args.crop_redetect:
+        print('[haware] --method crop but --crop-redetect was not passed: no re-detection '
+              'will happen, this run is equivalent to plain Pass-1 PifPaf.')
 
     # --- G projection ---
     g_proj_dir = os.path.dirname(os.path.abspath(args.g_proj))
@@ -192,10 +211,10 @@ def main():
     openpifpaf.decoder.configure(_dec_args)
     predictor = openpifpaf.Predictor(checkpoint=args.checkpoint)
 
-    # --- YOLO tracker (optional, for Method-B track-ID matching) ---
+    # --- YOLO tracker (only loaded for --method geometric) ---
     yolo_model = None
     yolo_classes = None
-    if args.yolo:
+    if args.method == 'geometric' and args.yolo:
         from ultralytics import YOLO as _YOLO
         yolo_model = _YOLO(args.yolo)
         if args.yolo_classes:
@@ -255,7 +274,7 @@ def main():
             out_data['frames'].append({'frame_index': frame_idx, 'objects': []})
             continue
 
-        # --- Method-B: YOLO tracking (unconditional) + IoU matching ---
+        # --- geometric matching (--method geometric only): YOLO tracking + IoU matching ---
         tracked_ids = [None] * len(predictions)
         bbox_2d_list = [None] * len(predictions)
         if yolo_model is not None:
@@ -305,9 +324,9 @@ def main():
         for j, ann in enumerate(predictions):
             n_det += 1
 
-            # Two-pass: crop around Pass-1 bbox and re-detect
+            # crop-and-redetect (--method crop only): crop around Pass-1 bbox and re-detect
             kp_24 = ann.data
-            if args.two_pass:
+            if args.method == 'crop' and args.crop_redetect:
                 bx, by, bw, bh = ann.bbox()
                 pad_x, pad_y = bw * args.crop_padding, bh * args.crop_padding
                 x0 = max(0, int(bx - pad_x))
