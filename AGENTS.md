@@ -177,6 +177,35 @@ Per-object fields added beyond the standard 14: `kp_cctv` (raw `[x, y, conf] × 
 for GUI overlay), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
 `failed_insufficient_kp`).
 
+### Reprojection keypoint visualization
+
+Plot per-vehicle `kp_sat` keypoint reprojections and `sat_coords` positions
+from an h-aware (or other replay-shaped) JSON onto the satellite image for a
+single frame. Each keypoint gets a black leader line to a
+`tracked_id-keypoint_name` label; vehicle position points are drawn larger
+with a black edge (keypoints use a white edge) and are not labeled.
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+python scripts/plot_reprojection_keypoints.py \
+  output/haware/test21/test21-6_yolo_reprojection.json.gz \
+  --frame-index 76
+```
+
+Options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--frame-index` | auto | Frame to plot; default auto-picks the frame with the most valid keypoints |
+| `--ids` | *(all)* | Comma-separated `tracked_id` values to include |
+| `--location-code` | inferred | Override inferred location code |
+| `--sat-image` | inferred | Override satellite image path |
+| `-o` / `--out` | next to input | Output PNG path |
+| `--dpi` | `200` | Output resolution |
+
+Output: PNG saved next to the input JSON by default
+(`<stem>.keypoints_frame<N>.png`).
+
 ### Trajectory smoothing and plotting
 
 The integrated trajectory tools live in `trafficlab/trajectory/` and are exposed
