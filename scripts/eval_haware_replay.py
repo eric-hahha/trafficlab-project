@@ -21,6 +21,7 @@ Usage:
         --spec-csv /tmp/autospec/engines.csv
 """
 import argparse
+import gzip
 import json
 import math
 import os
@@ -121,6 +122,23 @@ def _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=0.3):
     return tracked_ids, matched_boxes
 
 
+def _load_yolo_boxes_json(path: str, car_class: str) -> dict:
+    """Load a pre-computed replay JSON (e.g. from a separate YOLO run) and return
+    {frame_index: (boxes_xyxy, track_ids)}, filtered to car_class — an alternative
+    YOLO box source for --method geometric IoU matching, in place of a live model."""
+    opener = gzip.open if path.endswith('.gz') else open
+    with opener(path, 'rt') as f:
+        data = json.load(f)
+    by_frame = {}
+    for fr in data['frames']:
+        cars = [o for o in fr['objects'] if o.get('class') == car_class and o.get('bbox_2d')]
+        if cars:
+            boxes = [tuple(o['bbox_2d']) for o in cars]
+            tids  = [o.get('tracked_id') for o in cars]
+            by_frame[fr['frame_index']] = (boxes, tids)
+    return by_frame
+
+
 def _extract_yolo(results) -> tuple:
     """Extract (boxes_xyxy, track_ids) from a YOLO result list."""
     boxes, tids = [], []
@@ -176,9 +194,27 @@ def main():
                              '--yolo model.names (default: all classes)')
     parser.add_argument('--iou-threshold', type=float, default=0.3,
                         help='Minimum bbox IoU to accept a PifPaf↔YOLO match (default 0.3)')
+    parser.add_argument('--yolo-boxes-json', default=None,
+                        help='Path to a pre-computed replay JSON (e.g. pipeline.py output) '
+                             'supplying car bbox_2d + tracked_id per frame, used as the YOLO '
+                             'box source for --method geometric IoU matching instead of '
+                             'running a live YOLO model. When set, --yolo/--yolo-conf/'
+                             '--yolo-classes are ignored.')
+    parser.add_argument('--yolo-boxes-class', default='car',
+                        help='class value in --yolo-boxes-json to treat as a car (default "car")')
+    parser.add_argument('--start-frame', type=int, default=0,
+                        help='First frame index to process (default 0). Frames before this '
+                             'are read and discarded, not seeked — CAP_PROP_POS_FRAMES '
+                             'seeking has been unreliable on some test videos. --frames counts '
+                             'from this point, not from frame 0.')
+    parser.add_argument('--localizer', choices=['procrustes', 'reprojection'], default='procrustes',
+                        help='procrustes = closed-form 2D Procrustes on lifted sat coords '
+                             '(default); reprojection = fit the 3D template directly against '
+                             'PifPaf pixel positions via nonlinear least-squares '
+                             '(HawareLocalizer.localize_reprojection)')
     args = parser.parse_args()
 
-    if args.method == 'geometric' and not args.yolo:
+    if args.method == 'geometric' and not args.yolo and not args.yolo_boxes_json:
         print('[haware] --method geometric but --yolo is empty: no track-ID matching '
               'will happen, tracked_id will be null for every detection.')
     if args.method == 'crop' and not args.crop_redetect:
@@ -231,10 +267,19 @@ def main():
     openpifpaf.decoder.configure(_dec_args)
     predictor = openpifpaf.Predictor(checkpoint=args.checkpoint)
 
-    # --- YOLO tracker (only loaded for --method geometric) ---
+    # --- YOLO box source (only loaded for --method geometric) ---
+    # Either a live model (--yolo) or a pre-computed replay JSON (--yolo-boxes-json);
+    # the latter takes priority when both are set.
     yolo_model = None
     yolo_classes = None
-    if args.method == 'geometric' and args.yolo:
+    yolo_boxes_by_frame = None
+    if args.method == 'geometric' and args.yolo_boxes_json:
+        yolo_boxes_by_frame = _load_yolo_boxes_json(args.yolo_boxes_json, args.yolo_boxes_class)
+        n_loaded = sum(len(v[0]) for v in yolo_boxes_by_frame.values())
+        print(f'[haware] Loaded {n_loaded} "{args.yolo_boxes_class}" boxes across '
+              f'{len(yolo_boxes_by_frame)} frames from {args.yolo_boxes_json} '
+              f'(IoU threshold={args.iou_threshold})')
+    elif args.method == 'geometric' and args.yolo:
         from ultralytics import YOLO as _YOLO
         yolo_model = _YOLO(args.yolo)
         if args.yolo_classes:
@@ -248,7 +293,8 @@ def main():
     fps   = cap.get(cv2.CAP_PROP_FPS) or 30.0
     W     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    limit = total if args.frames < 0 else min(total, args.frames)
+    start = max(0, args.start_frame)
+    limit = total if args.frames < 0 else min(total, start + args.frames)
 
     # --- Output path ---
     if args.out:
@@ -278,12 +324,14 @@ def main():
     matched_tid_frames: dict = {}    # tid → frames PifPaf matched it
     no_pifpaf_tid_frames: dict = {}  # tid → YOLO saw it but PifPaf detected nothing
     no_match_tid_frames: dict = {}   # tid → PifPaf detected but IoU match failed
-    print(f'Processing {limit}/{total} frames → {out_path}')
+    print(f'Processing frames {start}..{limit - 1} ({limit - start}/{total}) → {out_path}')
 
     for frame_idx in range(limit):
         ret, frame = cap.read()
         if not ret:
             break
+        if frame_idx < start:
+            continue
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         pil = PIL.Image.fromarray(rgb)
@@ -299,11 +347,14 @@ def main():
         bbox_2d_list = [None] * len(predictions)
         kp_override = {}   # j (post-filter index) -> merged kp_24, set below for
                             # detections that absorbed a stray single-keypoint match
-        if yolo_model is not None:
-            yolo_res = yolo_model.track(frame, persist=True, conf=args.yolo_conf,
-                                        classes=yolo_classes, tracker='bytetrack.yaml',
-                                        verbose=False)
-            yolo_boxes, yolo_tids = _extract_yolo(yolo_res)
+        if yolo_model is not None or yolo_boxes_by_frame is not None:
+            if yolo_model is not None:
+                yolo_res = yolo_model.track(frame, persist=True, conf=args.yolo_conf,
+                                            classes=yolo_classes, tracker='bytetrack.yaml',
+                                            verbose=False)
+                yolo_boxes, yolo_tids = _extract_yolo(yolo_res)
+            else:
+                yolo_boxes, yolo_tids = yolo_boxes_by_frame.get(frame_idx, ([], []))
             n_yolo_det += len(yolo_boxes)
             if yolo_boxes:
                 n_yolo_frames += 1
@@ -415,7 +466,10 @@ def main():
                         kp_24[:, 0] += x0
                         kp_24[:, 1] += y0
 
-            result = localizer.localize(kp_24)
+            if args.localizer == 'reprojection':
+                result = localizer.localize_reprojection(kp_24)
+            else:
+                result = localizer.localize(kp_24)
 
             sat_coords = list(result.sat_coords) if result.sat_coords is not None else None
             have_heading = result.heading is not None
@@ -449,8 +503,13 @@ def main():
                 # h-aware diagnostic fields
                 'n_keypoints':      result.n_keypoints,
                 'status':           result.status,
+                'method':           result.method,
                 # raw CCTV keypoints [x, y, conf] × 24 for overlay rendering
                 'kp_cctv':          kp_24.tolist(),
+                # per-keypoint sat-plane projection, same indexing as kp_cctv;
+                # null where that keypoint wasn't confident enough to lift
+                'kp_sat':           [list(result.p_sat[i]) if i in result.p_sat else None
+                                     for i in range(24)],
             })
 
         out_data['frames'].append({'frame_index': frame_idx, 'objects': frame_objects})
@@ -474,7 +533,7 @@ def main():
 
     print(f'\nDone: {n_frames_processed} frames, {n_det} detections')
     print(f'  ok={n_ok}  ambiguous={n_ambig}  failed={n_fail}')
-    if yolo_model is not None:
+    if yolo_model is not None or yolo_boxes_by_frame is not None:
         pct = 100 * n_matched / n_det if n_det > 0 else 0.0
         print(f'  YOLO frames:      {n_yolo_frames}/{n_frames_processed}  detections: {n_yolo_det}')
         print(f'  PifPaf < YOLO 幀: {n_frames_pifpaf_fewer}/{n_frames_processed}')
