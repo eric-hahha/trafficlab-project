@@ -120,20 +120,6 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/er
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
 ```
 
-### OpenPifPaf wheel detection scatter plot
-
-Plot all OpenPifPaf-detected wheel positions projected onto the satellite image (no YOLO, no tracking):
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/eval_pifpaf_sat.py \
-  --video location/test21/footage/test21-2.mp4 \
-  --g-proj location/test21/G_projection_test21.json \
-  --out /private/tmp/sat_scatter.png \
-  --frames 100
-```
-
-Options: `--checkpoint` (default `shufflenetv2k16-apollo-24`), `--kp-conf` (default `0.2`), `--frames` (default `-1` = all).
-
 ### H-aware 3D keypoint localization
 
 Run OpenPifPaf Apollo-24 detection on every frame and localize each vehicle via

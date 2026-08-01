@@ -245,7 +245,7 @@ class TrajectoryPlotter:
                 y_coords,
                 linestyle="None",
                 marker="o",
-                markersize=4,
+                markersize=2,
                 color=color,
                 markeredgecolor="white",
                 markeredgewidth=0.4,
@@ -255,27 +255,6 @@ class TrajectoryPlotter:
             if len(legend_items) < 15:
                 obj_class = object_classes.get(track_id, "unknown")
                 legend_items.append((line, f"ID {track_id} ({obj_class})"))
-
-            ax.plot(
-                x_coords[0],
-                y_coords[0],
-                "o",
-                color="lime",
-                markersize=3,
-                markeredgecolor="darkgreen",
-                markeredgewidth=2,
-                alpha=0.9,
-            )
-            ax.plot(
-                x_coords[-1],
-                y_coords[-1],
-                "s",
-                color="red",
-                markersize=3,
-                markeredgecolor="darkred",
-                markeredgewidth=2,
-                alpha=0.9,
-            )
 
             if show_heading_arrows:
                 for point_x, point_y, heading in headings.get(track_id, []):
@@ -581,7 +560,6 @@ class TrajectoryPlotter:
 
         lines = [f"Selected Trajectories: {len(trajectories)}", "Selected Classes:"]
         lines.extend(f"  {name}: {count}" for name, count in sorted(class_counts.items()))
-        lines.extend(["", "Legend:", "  green circle: start", "  red square: end"])
         if transform:
             lines.extend(
                 [
