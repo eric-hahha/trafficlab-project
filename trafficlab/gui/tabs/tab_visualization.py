@@ -64,12 +64,13 @@ class VisualizationTab(QWidget):
         self.sat_opacity = 0
         self.show_sat_box = True
         self.sat_box_thick = 2
-        self.show_sat_arrow = False
+        self.show_sat_arrow = True
         self.show_sat_label = False
+        self.show_sat_keypoints = False
         self.sat_label_size = 12
 
         # --- NEW: Coordinate Dot State ---
-        self.show_sat_coords_dot = False 
+        self.show_sat_coords_dot = True
 
         self.text_color_mode = "White"
         self.speed_update_delay_frames = 30
@@ -182,17 +183,22 @@ class VisualizationTab(QWidget):
         self.chk_sat_box.toggled.connect(self.update_ui_state)
         # --- NEW: Coords Dot Checkbox ---
         self.chk_sat_coords = QCheckBox("Show Coords Dot")
-        self.chk_sat_coords.setChecked(False)
+        self.chk_sat_coords.setChecked(True)
         self.chk_sat_coords.toggled.connect(self.update_ui_state)
-        self.chk_sat_arrow = QCheckBox("Heading Arrow"); self.chk_sat_arrow.setChecked(False)
+        self.chk_sat_arrow = QCheckBox("Heading Arrow"); self.chk_sat_arrow.setChecked(True)
         self.chk_sat_arrow.toggled.connect(self.update_ui_state)
         self.chk_sat_label = QCheckBox("Text Label"); self.chk_sat_label.setChecked(self.show_sat_label)
         self.chk_sat_label.toggled.connect(self.update_ui_state)
+        # --- NEW: Keypoint Reprojection Checkbox ---
+        self.chk_sat_keypoints = QCheckBox("Show Keypoints")
+        self.chk_sat_keypoints.setChecked(self.show_sat_keypoints)
+        self.chk_sat_keypoints.toggled.connect(self.update_ui_state)
         # Add widgets to layout
         sat_vis_layout.addWidget(self.chk_sat_box)
         sat_vis_layout.addWidget(self.chk_sat_coords)
         sat_vis_layout.addWidget(self.chk_sat_arrow)
         sat_vis_layout.addWidget(self.chk_sat_label)
+        sat_vis_layout.addWidget(self.chk_sat_keypoints)
         
         th_lay = QHBoxLayout()
         th_lay.addWidget(QLabel("Box Thick:"))
@@ -497,7 +503,7 @@ class VisualizationTab(QWidget):
                     break
 
             self.chk_3d_box.setEnabled(self.has_3d_data)
-            self.chk_3d_box.setChecked(self.has_3d_data)
+            self.chk_3d_box.setChecked(False)
 
             self.setup_video(data)
             self.setup_sat_view(data)
@@ -939,6 +945,7 @@ class VisualizationTab(QWidget):
         self.show_tracking = self.chk_tracking.isChecked()
         self.sat_box_thick = self.slider_sat_thick.value()
         self.show_sat_label = self.chk_sat_label.isChecked()
+        self.show_sat_keypoints = self.chk_sat_keypoints.isChecked()
         self.sat_label_size = self.slider_sat_text.value()
         self.show_sat_box = self.chk_sat_box.isChecked()
         # --- NEW: Update State ---
@@ -1082,6 +1089,7 @@ class VisualizationTab(QWidget):
             sat_use_svg=getattr(self, 'sat_use_svg', True),
             show_3d=self.show_3d,
             show_sat_label=self.show_sat_label,
+            show_sat_keypoints=self.show_sat_keypoints,
             sat_label_size=self.sat_label_size,
             text_color_mode=self.text_color_mode,
             speed_display_cache=self.speed_display_cache,
