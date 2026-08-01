@@ -128,7 +128,11 @@ class CCTRenderer:
                     if show_label:
                         conf = obj.get("confidence")
                         conf_str = f" {conf:.2f}" if conf is not None else ""
-                        lbl_2d = f"{lbl}{conf_str}"
+                        n_kp = obj.get("n_keypoints")
+                        kp_str = f" kp={n_kp}" if n_kp is not None else ""
+                        method = obj.get("method")
+                        method_str = f" m{method}" if method is not None else ""
+                        lbl_2d = f"{lbl}{conf_str}{kp_str}{method_str}"
                         painter.setPen(QPen(Qt.white))
                         fm = painter.fontMetrics()
                         tw, th = fm.width(lbl_2d), fm.height()
