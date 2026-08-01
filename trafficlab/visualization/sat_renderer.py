@@ -1,11 +1,30 @@
 import math
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QPointF
+from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import (QColor, QPen, QBrush, QPolygonF,
-                         QImage, QPixmap, QPainter, QFont)
+                         QImage, QPixmap, QPainter, QFont, QFontMetricsF)
 
 from trafficlab.visualization.cctv_renderer import get_color_from_string
+
+# ApolloCar3D 24-keypoint order (matches scripts/eval_openpifpaf.py KEYPOINT_NAMES,
+# scripts/plot_reprojection_keypoints.py, and the p_sat / kp_sat index used by
+# trafficlab/motion/haware_localization.py).
+_KEYPOINT_NAMES = [
+    'front_up_right', 'front_up_left', 'front_light_right', 'front_light_left',
+    'front_low_right', 'front_low_left', 'central_up_left', 'front_wheel_left',
+    'rear_wheel_left', 'rear_corner_left', 'rear_up_left', 'rear_up_right',
+    'rear_light_left', 'rear_light_right', 'rear_low_left', 'rear_low_right',
+    'central_up_right', 'rear_corner_right', 'rear_wheel_right', 'front_wheel_right',
+    'rear_plate_left', 'rear_plate_right', 'mirror_edge_left', 'mirror_edge_right',
+]
+_KP_LABEL_OFFSETS = [
+    (dx * radius, dy * radius)
+    for radius in (10, 18, 28, 40, 55, 72, 92, 115)
+    for dx, dy in ((1, 1), (1, -1), (-1, 1), (-1, -1), (1, 0), (-1, 0), (0, 1), (0, -1))
+]
+_KP_MARKER_RADIUS = 3.0
+_KP_LABEL_FONT_SIZE = 6.0
 
 
 class SatRenderer:
@@ -31,6 +50,7 @@ class SatRenderer:
                sat_use_svg=True,
                show_3d=True,
                show_sat_label=False,
+               show_sat_keypoints=False,
                sat_label_size=12,
                text_color_mode="White",
                speed_display_cache=None,
@@ -140,5 +160,102 @@ class SatRenderer:
 
                 painter.drawText(QPointF(coord[0], coord[1]), label_str)
 
+        if show_sat_keypoints:
+            self._draw_keypoints(painter, objects, show_tracking, scene_w, scene_h)
+
         painter.end()
         return QPixmap.fromImage(self._img)
+
+    # --- Keypoint reprojection overlay ---
+    # Mirrors scripts/plot_reprojection_keypoints.py: white-edged dots per
+    # kp_sat entry, each with a "tracked_id-keypoint_name" label joined to its
+    # point by a black leader line, placed to avoid covering any point marker
+    # or other label.
+    def _draw_keypoints(self, painter, objects, show_tracking, scene_w, scene_h):
+        kp_points = []  # (x, y, tracked_id, kp_idx, color)
+        for obj in objects:
+            kp_sat = obj.get("kp_sat")
+            if not kp_sat:
+                continue
+            tid = obj.get("tracked_id")
+            cls = obj.get("class", "?")
+            seed = f"{cls}_{tid}" if (show_tracking and tid is not None) else cls
+            col = get_color_from_string(seed)
+            for kp_idx, kp in enumerate(kp_sat):
+                if kp is None:
+                    continue
+                kp_points.append((float(kp[0]), float(kp[1]), tid, kp_idx, col))
+
+        if not kp_points:
+            return
+
+        painter.setPen(QPen(Qt.white, 0.8))
+        for x, y, _tid, _kp_idx, col in kp_points:
+            painter.setBrush(QBrush(col))
+            painter.drawEllipse(QPointF(x, y), _KP_MARKER_RADIUS, _KP_MARKER_RADIUS)
+
+        font = QFont()
+        font.setPointSizeF(_KP_LABEL_FONT_SIZE)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+
+        bounds = (0.0, 0.0, float(scene_w), float(scene_h))
+        occupied = [
+            (x - _KP_MARKER_RADIUS, y - _KP_MARKER_RADIUS,
+             x + _KP_MARKER_RADIUS, y + _KP_MARKER_RADIUS)
+            for x, y, *_ in kp_points
+        ]
+
+        for x, y, tid, kp_idx, _col in kp_points:
+            label = f"{tid if tid is not None else '?'}-{_KEYPOINT_NAMES[kp_idx]}"
+            rect = metrics.boundingRect(label)
+            offset = self._place_kp_label(x, y, (rect.width(), rect.height()), occupied, bounds)
+            lx, ly = x + offset[0], y + offset[1]
+
+            painter.setPen(QPen(Qt.black, 0.6))
+            painter.drawLine(QPointF(x, y), QPointF(lx, ly))
+
+            pad = 2.0
+            box = QRectF(lx - rect.width() / 2.0 - pad, ly - rect.height() / 2.0 - pad,
+                         rect.width() + 2 * pad, rect.height() + 2 * pad)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 190)))
+            painter.drawRoundedRect(box, 2, 2)
+
+            painter.setPen(QPen(Qt.black))
+            painter.drawText(box, Qt.AlignCenter, label)
+
+    @staticmethod
+    def _kp_label_box(x, y, offset, size):
+        w, h = size
+        cx, cy = x + offset[0], y + offset[1]
+        pad = 2.0
+        return (cx - w / 2.0 - pad, cy - h / 2.0 - pad, cx + w / 2.0 + pad, cy + h / 2.0 + pad)
+
+    @staticmethod
+    def _kp_boxes_overlap(a, b):
+        return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+    @staticmethod
+    def _kp_within_bounds(box, bounds):
+        return (box[0] >= bounds[0] and box[1] >= bounds[1]
+                and box[2] <= bounds[2] and box[3] <= bounds[3])
+
+    def _place_kp_label(self, x, y, size, occupied, bounds):
+        best_in_bounds = None  # (overlap_count, offset, box)
+        best_any = None
+        for offset in _KP_LABEL_OFFSETS:
+            box = self._kp_label_box(x, y, offset, size)
+            overlap_count = sum(1 for other in occupied if self._kp_boxes_overlap(box, other))
+            in_bounds = self._kp_within_bounds(box, bounds)
+            if overlap_count == 0 and in_bounds:
+                occupied.append(box)
+                return offset
+            if in_bounds and (best_in_bounds is None or overlap_count < best_in_bounds[0]):
+                best_in_bounds = (overlap_count, offset, box)
+            if best_any is None or overlap_count < best_any[0]:
+                best_any = (overlap_count, offset, box)
+
+        _, offset, box = best_in_bounds if best_in_bounds is not None else best_any
+        occupied.append(box)
+        return offset
