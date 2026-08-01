@@ -139,18 +139,28 @@ Options: `--checkpoint` (default `shufflenetv2k16-apollo-24`), `--kp-conf` (defa
 Run OpenPifPaf Apollo-24 detection on every frame and localize each vehicle via
 height-aware keypoint template matching. Output is a standard TrafficLab replay
 JSON loadable in the GUI (satellite position, heading, footprint, and CCTV
-keypoint overlay).
+keypoint overlay). `--method` is required and selects one of two mutually
+exclusive per-frame strategies — only the selected strategy's own flags take
+effect.
 
 ```bash
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
 PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \
   --video location/test21/footage/test21-4.mp4 \
-  --g-proj location/test21/G_projection_test21.json
+  --g-proj location/test21/G_projection_test21.json \
+  --method geometric
 ```
 
 Output: `output/haware/<location_code>/<video_stem>.json.gz`
 
-Options:
+`--method` choices:
+
+| Method | What it does | Relevant flags |
+|--------|---------------|-----------------|
+| `geometric` | Bridge PifPaf detections to YOLO track IDs via bbox IoU. A PifPaf detection with only one confident keypoint has a zero-area bbox and never clears the IoU threshold on its own — a second pass recovers these: if the lone keypoint falls inside exactly one YOLO box, it's merged into the detection already IoU-matched to that track this frame (the fragment is then dropped so it doesn't also appear as its own object), or, if no such detection exists this frame, the fragment is tagged with the track id directly. | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` |
+| `crop` | Crop each Pass-1 bbox and re-run PifPaf on the crop to recover more confident keypoints. | `--crop-redetect` / `--crop-padding` |
+
+Shared options:
 
 | Flag | Default | Notes |
 |------|---------|-------|
@@ -160,6 +170,22 @@ Options:
 | `--kp-conf` | `0.2` | Keypoint confidence threshold |
 | `--frames` | `-1` (all) | Limit frames for quick tests |
 | `--out` | auto | Override output path |
+
+`--method geometric` options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--yolo` | `models/best.pt` | YOLO model for track-ID matching (ByteTrack); pass `--yolo ""` to disable and leave `tracked_id=None` |
+| `--yolo-conf` | `0.25` | YOLO detection confidence threshold |
+| `--yolo-classes` | *(all)* | Comma-separated YOLO class indices to keep — model-specific, check the `--yolo` model's `.names` |
+| `--iou-threshold` | `0.3` | Minimum bbox IoU to accept a PifPaf↔YOLO match |
+
+`--method crop` options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--crop-redetect` | off | Crop each Pass-1 bbox with 50% padding and re-run PifPaf; without this flag `--method crop` is equivalent to plain Pass-1 PifPaf |
+| `--crop-padding` | `0.5` | Fractional padding around the bbox for the crop |
 
 Per-object fields added beyond the standard 14: `kp_cctv` (raw `[x, y, conf] × 24`
 for GUI overlay), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /

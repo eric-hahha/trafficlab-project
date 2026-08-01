@@ -71,6 +71,26 @@ def _kp_bbox_xyxy(kp_24: np.ndarray, kp_conf: float):
             float(pts[:, 0].max()), float(pts[:, 1].max()))
 
 
+def _single_confident_kp(kp_24: np.ndarray, kp_conf: float):
+    """Return (kp_index, x, y) if exactly one keypoint clears kp_conf, else None.
+
+    Counts directly rather than inferring from a degenerate (zero-area)
+    _kp_bbox_xyxy box, since two different keypoint indices landing on the
+    same pixel would also produce a degenerate box despite n=2.
+    """
+    mask = (kp_24[:, 2] >= kp_conf) & ~((kp_24[:, 0] == 0) & (kp_24[:, 1] == 0))
+    idx = np.nonzero(mask)[0]
+    if len(idx) != 1:
+        return None
+    i = int(idx[0])
+    return i, float(kp_24[i, 0]), float(kp_24[i, 1])
+
+
+def _point_in_box(x: float, y: float, box) -> bool:
+    x0, y0, x1, y1 = box
+    return x0 <= x <= x1 and y0 <= y <= y1
+
+
 def _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=0.3):
     """Match each PifPaf bbox to the best-IoU YOLO bbox.
 
@@ -277,6 +297,8 @@ def main():
         # --- geometric matching (--method geometric only): YOLO tracking + IoU matching ---
         tracked_ids = [None] * len(predictions)
         bbox_2d_list = [None] * len(predictions)
+        kp_override = {}   # j (post-filter index) -> merged kp_24, set below for
+                            # detections that absorbed a stray single-keypoint match
         if yolo_model is not None:
             yolo_res = yolo_model.track(frame, persist=True, conf=args.yolo_conf,
                                         classes=yolo_classes, tracker='bytetrack.yaml',
@@ -307,6 +329,52 @@ def main():
                 bbox_2d_list = [mb if mb is not None else pb
                                 for mb, pb in zip(matched_boxes, pifpaf_boxes)]
 
+                # Single-keypoint recovery: a PifPaf detection with only one
+                # confident keypoint has a zero-area bbox, so its IoU against
+                # every YOLO box is 0 and it never clears iou_threshold above —
+                # even when it's really just a fragment of a car YOLO already
+                # tracks. If its one point falls inside exactly one (unpadded)
+                # YOLO box, borrow that YOLO box's track: merge the point into
+                # the detection already IoU-matched to that track this frame
+                # (more keypoints -> better localizer fit) and drop this
+                # fragment so it doesn't also appear as its own object; if no
+                # such detection exists this frame, just tag the fragment with
+                # the track id directly (it will still fail localization on
+                # its own, but stays colour-consistent downstream).
+                absorbed = set()
+                for j, ann in enumerate(predictions):
+                    if tracked_ids[j] is not None:
+                        continue
+                    single = _single_confident_kp(ann.data, args.kp_conf)
+                    if single is None:
+                        continue
+                    kp_idx, x, y = single
+                    containing = [k for k, yb in enumerate(yolo_boxes) if _point_in_box(x, y, yb)]
+                    if len(containing) != 1:
+                        continue
+                    tid = yolo_tids[containing[0]]
+                    if tid is None:
+                        continue
+                    main_j = next((jj for jj in range(len(predictions))
+                                   if jj != j and tracked_ids[jj] == tid), None)
+                    if main_j is None:
+                        tracked_ids[j] = tid
+                        continue
+                    main_kp = kp_override.get(main_j, predictions[main_j].data.copy())
+                    if main_kp[kp_idx, 2] < args.kp_conf or (
+                            main_kp[kp_idx, 0] == 0 and main_kp[kp_idx, 1] == 0):
+                        main_kp[kp_idx] = ann.data[kp_idx]
+                        kp_override[main_j] = main_kp
+                    absorbed.add(j)
+
+                if absorbed:
+                    keep = [j for j in range(len(predictions)) if j not in absorbed]
+                    predictions  = [predictions[j] for j in keep]
+                    tracked_ids  = [tracked_ids[j] for j in keep]
+                    bbox_2d_list = [bbox_2d_list[j] for j in keep]
+                    kp_override  = {new_j: kp_override[old_j]
+                                    for new_j, old_j in enumerate(keep) if old_j in kp_override}
+
                 # Detections that didn't clear the IoU threshold keep their own
                 # PifPaf per-frame instance index as an id (offset by 500 to
                 # stay clear of real YOLO track IDs), so they stay
@@ -325,7 +393,9 @@ def main():
             n_det += 1
 
             # crop-and-redetect (--method crop only): crop around Pass-1 bbox and re-detect
-            kp_24 = ann.data
+            # kp_override (--method geometric only): use the merged keypoints when this
+            # detection absorbed a stray single-keypoint match (see geometric matching above)
+            kp_24 = kp_override.get(j, ann.data)
             if args.method == 'crop' and args.crop_redetect:
                 bx, by, bw, bh = ann.bbox()
                 pad_x, pad_y = bw * args.crop_padding, bh * args.crop_padding
