@@ -131,7 +131,7 @@ effect.
 
 ```bash
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
-PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \
+PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
   --video location/test21/footage/test21-4.mp4 \
   --g-proj location/test21/G_projection_test21.json \
   --method geometric
@@ -143,7 +143,7 @@ Output: `output/haware/<location_code>/<video_stem>.json.gz`
 
 | Method | What it does | Relevant flags |
 |--------|---------------|-----------------|
-| `geometric` | Bridge PifPaf detections to YOLO track IDs via bbox IoU. A PifPaf detection with only one confident keypoint has a zero-area bbox and never clears the IoU threshold on its own — a second pass recovers these: if the lone keypoint falls inside exactly one YOLO box, it's merged into the detection already IoU-matched to that track this frame (the fragment is then dropped so it doesn't also appear as its own object), or, if no such detection exists this frame, the fragment is tagged with the track id directly. | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` |
+| `geometric` | Bridge PifPaf detections to YOLO track IDs via bbox IoU. A PifPaf detection with only one confident keypoint has a zero-area bbox and never clears the IoU threshold on its own — a second pass recovers these: if the lone keypoint falls inside exactly one YOLO box, it's merged into the detection already IoU-matched to that track this frame (the fragment is then dropped so it doesn't also appear as its own object), or, if no such detection exists this frame, the fragment is tagged with the track id directly. | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
 | `crop` | Crop each Pass-1 bbox and re-run PifPaf on the crop to recover more confident keypoints. | `--crop-redetect` / `--crop-padding` |
 
 Shared options:
@@ -155,6 +155,8 @@ Shared options:
 | `--body-type` | `Sedan` | Used with `--spec-csv` |
 | `--kp-conf` | `0.2` | Keypoint confidence threshold |
 | `--frames` | `-1` (all) | Limit frames for quick tests |
+| `--start-frame` | `0` | First frame to process; frames before this are read and discarded, not seeked |
+| `--localizer` | `procrustes` | `procrustes` (closed-form 2D Procrustes) or `reprojection` (nonlinear least-squares fit against PifPaf pixel positions) |
 | `--out` | auto | Override output path |
 
 `--method geometric` options:
@@ -165,6 +167,8 @@ Shared options:
 | `--yolo-conf` | `0.25` | YOLO detection confidence threshold |
 | `--yolo-classes` | *(all)* | Comma-separated YOLO class indices to keep — model-specific, check the `--yolo` model's `.names` |
 | `--iou-threshold` | `0.3` | Minimum bbox IoU to accept a PifPaf↔YOLO match |
+| `--yolo-boxes-json` | *(none)* | Use a pre-computed replay JSON (e.g. `pipeline.py` output) as the YOLO box source instead of running a live model; takes priority over `--yolo` when set |
+| `--yolo-boxes-class` | `car` | `class` value in `--yolo-boxes-json` to treat as a car |
 
 `--method crop` options:
 
@@ -205,6 +209,64 @@ Options:
 
 Output: PNG saved next to the input JSON by default
 (`<stem>.keypoints_frame<N>.png`).
+
+### CarFusion vehicle pose + tracking
+
+Run CarFusion's YOLOv8-Pose model (one-stage bbox + 14 keypoints) on every
+frame with ByteTrack cross-frame tracking enabled, project keypoints to
+satellite coordinates, and fit vehicle center/heading via Procrustes SVD.
+Output is a side-by-side CCTV+SAT composite per frame plus a standard
+TrafficLab replay JSON loadable in the GUI.
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+python scripts/run_keypoints_carfusion.py \
+  --video location/test21/footage/test21-4.mp4 \
+  --weights models/carfusion_last.pt \
+  --g-proj location/test21/G_projection_test21.json \
+  --sat location/test21/sat_test21.png \
+  --out /private/tmp/carfusion_sat/
+```
+
+Output: composite JPGs + `scatter.png` + `detections.json` under `--out`.
+
+Options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--weights` | `models/carfusion_last.pt` | YOLOv8-Pose weights |
+| `--start-frame` | `0` | First frame to process |
+| `--frames` | `-1` (all) | Limit frames for quick tests |
+| `--conf` | `0.25` | YOLO detection threshold — only decides what YOLO hands to the tracker, not what survives it (see below) |
+| `--kp-conf` | `0.2` | Per-keypoint confidence threshold |
+| `--tracker` | `trafficlab/inference/bytetrack.yaml` | Pinned ByteTrack config; not the bare ultralytics package default |
+
+Tracking notes:
+- `.track()` mode can drop a whole detection from the output entirely (not
+  leave `tracked_id=None`) if ByteTrack never confirms it as a track. This is
+  independent of `--conf` — see `docs/keypoints-carfusion-tracking.md` for the
+  `is_activated` / `fuse_score` mechanics behind this.
+- `trafficlab/inference/bytetrack.yaml` currently has `track_high_thresh` /
+  `track_low_thresh` / `new_track_thresh` lowered to `0.01` and
+  `fuse_score: False`, tuned for low-confidence / partially-cropped vehicles.
+  Check this file's current values before assuming ultralytics defaults apply.
+
+Per-object fields beyond the standard shape: `bbox_2d`, `bbox_cctv`, `kp_cctv`
+(raw `[x, y, conf] × 14`), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
+`failed_insufficient_kp`), `have_heading`, `have_measurements`,
+`sat_floor_box`, `bbox_3d`. Top-level: `mp4_path`, `meta`, `location_code`,
+`mp4_frame_count`, `animation_frame_count`.
+
+To backfill these fields into a `detections.json` generated before this schema
+existed, without re-running detection/tracking:
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+python scripts/patch_carfusion_replay_fields.py \
+  --json /path/to/detections.json \
+  --video location/test21/footage/test21-4.mp4 \
+  --g-proj location/test21/G_projection_test21.json
+```
 
 ### Trajectory smoothing and plotting
 

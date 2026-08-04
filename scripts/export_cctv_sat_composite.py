@@ -20,7 +20,7 @@ import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QPainter
 
-from trafficlab.motion.haware_localization import kp_bbox_xyxy
+from trafficlab.motion.keypoints_openpifpaf import kp_bbox_xyxy
 from trafficlab.visualization.cctv_renderer import CCTRenderer
 from trafficlab.visualization.sat_renderer import SatRenderer
 

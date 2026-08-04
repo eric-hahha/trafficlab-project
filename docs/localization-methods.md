@@ -15,7 +15,7 @@
 | **C. H-aware 3D Template** | OpenPifPaf（全圖）| 24 kp + 各自高度先驗 → SVD 擬合 | 🔧 評估中 | 高（理論）| 中（受 PifPaf domain gap）|
 | **D. PnP（Perspective-n-Point）** | OpenPifPaf + 3D 樣板 + K | 2D–3D 對應 → cv2.solvePnP → 6-DoF 姿態 | ❌ 不採用 | 低（高俯角退化）| 同 PifPaf |
 | **E. BEVHeight / BEVHeight++** | 單張影像（需 K）| BEV 特徵 + height-aware voxel pooling → 7-DoF bbox | 📋 待測試 | 高（路側設計）| 高（端對端偵測）|
-| **F. CarFusion YOLOv8 Pose** | 整張影像 | YOLOv8 pose，14 kp，路口視角訓練 | 📋 待評估 | 未知 | 未知 |
+| **F. CarFusion YOLOv8 Pose** | 整張影像 | YOLOv8 pose，14 kp，路口視角訓練 | ✅ 已評估、已整合跨幀追蹤 | 中高（同 SVD 擬合法）| 高（one-stage，未見明顯 domain gap）|
 
 ---
 
@@ -60,8 +60,8 @@ wheel_localization:
 
 ## C. H-aware 3D Keypoint Template（主要候選）
 
-**相關檔案**：`trafficlab/motion/haware_localization.py`、`scripts/eval_haware_replay.py`  
-**詳細說明**：`docs/haware-intro.md`、`docs/3d-keypoint-template-localization.md`
+**相關檔案**：`trafficlab/motion/keypoints_openpifpaf.py`、`scripts/run_keypoints_openpifpaf.py`  
+**詳細說明**：`docs/keypoints-openpifpaf-intro.md`、`docs/3d-keypoint-template-localization.md`
 
 **原理**：
 - 對整張影像（不 crop）跑 OpenPifPaf，取得所有 24 Apollo-24 keypoint
@@ -80,16 +80,16 @@ wheel_localization:
 | 規格庫實測值（`--spec-csv engines.csv`）| 外框/輪胎實測 | 估算（spec sheet 不含）| 低（下載 CSV 即可）| ⚠️ 尚未下載 |
 | CAD 模型轉換（幾何啟發式 / Blender 手標）| 全 kp 同源 | 實測 | 高（語義映射工作量大）| 📋 未實作 |
 
-目前實際使用 `prior_dimensions.json`（湊整估算值）或內建 `_FALLBACK_DIMS`，兩者均非實測。詳見 `docs/haware-intro.md`。
+目前實際使用 `prior_dimensions.json`（湊整估算值）或內建 `_FALLBACK_DIMS`，兩者均非實測。詳見 `docs/keypoints-openpifpaf-intro.md`。
 
 **現存限制**：
 - PifPaf domain gap（ApolloCar3D 前視視角訓練）仍使偵測率偏低
 - Track ID 需後處理橋接（Method B：bbox IoU 配對 YOLO tracker，見 `docs/haware-id-matching.md`）
-- 尚未整合進主 pipeline，目前以 `eval_haware_replay.py` 獨立評估
+- 尚未整合進主 pipeline，目前以 `run_keypoints_openpifpaf.py` 獨立評估
 
 **執行指令**：
 ```bash
-PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \
+PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
   --video location/test21/footage/test21-4.mp4 \
   --g-proj location/test21/G_projection_test21.json \
   --yolo models/yolo11s-visdrone-v2-ft.pt --yolo-classes 2
@@ -119,7 +119,7 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
 
 **學術參考**：
 
-- **Deep MANTA（CVPR 2017）**：此路線的代表實作——250 個 CAD 車型庫 + 36 語義 kp + EPnP，專為前視相機設計。說明 PnP 在「有精確 K + 低俯角」的條件下可行，但這兩個條件本專案都不具備。
+- **Deep MANTA（CVPR 2017）**：此路線的代表實作——250 個 CAD 車型庫 + 36 語義 kp + EPnP，專為前視相機設計。說明 PnP 在「有精確 K + 低俯角」的條件下可行，但這兩個條件本專案都不具備。論文發表時未釋出官方代碼，搜尋不到後續官方開源，即使幾何假設成立也無法直接取用。
 - **RTM3D（ECCV 2020）**：最精簡版本——不用語義零件，只偵測 3D bbox 的 9 個幾何角點 heatmap，再 PnP 反推，達 ~14 FPS。說明即使 keypoint 極簡化，PnP 仍需要精確 K；在前視場景效果好，俯角場景同樣退化。
 
 > 若要強行使用 PnP，需先校正 K（棋盤格標定、深度學習單張估算 GeoCalib、或消失點幾何法），詳見 `docs/3d-keypoint-template-localization.md` § 3A。
@@ -151,18 +151,13 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
 
 **Repo**：`Habib0905/Vehicle-Pose-Estimation`  
 **訓練資料**：CarFusion（Pittsburgh 路口攝影機，路側視角）
+**詳細說明**：`docs/keypoints-carfusion-intro.md`（原理、演算法）、`docs/keypoints-carfusion-tracking.md`（跨幀追蹤整合、除錯過程、測試數字）
 
-**原理**：YOLOv8 pose 一階段輸出 14 個車輛 keypoint（4 輪 + 4 燈 + 4 車頂角 + 排氣管 + 中心），可從 keypoint 推算中心與朝向。
+**原理**：YOLOv8 pose 一階段輸出 14 個車輛 keypoint（4 輪 + 4 燈 + 4 車頂角 + 排氣管 + 中心），核心配準演算法跟 C. H-aware 完全相同（Procrustes SVD），差別只在偵測前段（one-stage YOLO vs OpenPifPaf）跟 keypoint 定義。
 
-**潛在優勢**：訓練資料比 ApolloCar3D 更接近路側交叉口視角；ultralytics 已在 `trafficlab` env，整合成本低。
+**已確認**：訓練視角比 ApolloCar3D 更接近路側交叉口，實測未見明顯 domain gap；已整合跨幀 `tracked_id`（ultralytics ByteTrack）與 GUI 播放器相容輸出（`bbox_2d`/`sat_floor_box`/`bbox_3d` 等）。
 
-**不確定因素**：訓練視角高度未知；weights 品質尚未實測。
-
-**建議評估步驟**：
-1. 下載 weights（Google Drive，repo 內連結）
-2. `model = YOLO('weights.pt')` 跑 `test21-3sf.mp4`
-3. 比對每幀偵測台數（vs OpenPifPaf 的 2–5 台）
-4. 目視確認 keypoint 位置
+**現存限制**：跟 C. H-aware 一樣依賴 `prior_dimensions.json`/`_FALLBACK_DIMS` 的車輛尺寸估算值，非實測；ByteTrack 門檻需要針對低信心/部分入鏡車輛調整（見 `docs/keypoints-carfusion-tracking.md`）。
 
 ---
 
@@ -182,8 +177,9 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
        ├─ 先在 Colab 跑 out-of-box 看 yaw 品質
        └─ 若不足 → WARM-3D 弱監督遷移
 
-待評估（低成本，可插入測試）
+已評估、與 C 並列的候選（one-stage、覆蓋率較高）
   └─ F. CarFusion YOLOv8 Pose
+       └─ 已整合跨幀追蹤（ByteTrack）+ GUI 播放器輸出
 ```
 
 ---
@@ -192,7 +188,9 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
 
 | 文件 | 內容 |
 |------|------|
-| `docs/haware-intro.md` | H-aware 方法介紹（原理、流程、使用方式）|
+| `docs/keypoints-openpifpaf-intro.md` | H-aware 方法介紹（原理、流程、使用方式）|
 | `docs/3d-keypoint-template-localization.md` | H-aware 完整技術文件（概念、PnP vs h-aware、樣板設計）|
 | `docs/haware-id-matching.md` | Track ID 橋接實作（Method B，bbox IoU 配對）|
 | `docs/method-survey.md` | 車輛**朝向估算**方法調查（Pirazh / BEVHeight / YAEN 等）|
+| `docs/keypoints-carfusion-intro.md` | CarFusion 方法介紹、演算法細節（同 SVD 擬合，14 kp）|
+| `docs/keypoints-carfusion-tracking.md` | CarFusion 跨幀追蹤（ByteTrack）整合過程、除錯細節、測試數字 |
