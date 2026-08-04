@@ -2,7 +2,7 @@
 Evaluate Pirazh keypoint detection on CCTV footage.
 
 Usage:
-    python scripts/eval_keypoints.py \\
+    python scripts/eval_pirazh.py \\
         --checkpoint checkpoints/pirazh_stage2.pth.tar \\
         --video location/test1/footage/test1_8_100_s.mp4 \\
         --yolo models/yolov8n.pt \\
