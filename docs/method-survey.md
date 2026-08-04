@@ -37,7 +37,7 @@
 ### Bbox 幾何法
 
 **論文/來源**：無，專案內自行開發  
-**相關檔案**：`trafficlab/motion/bbox_heading.py`、`scripts/eval_bbox_heading.py`
+**相關檔案**：`scripts/archive/bbox_heading.py`、`scripts/archive/eval_bbox_heading.py`（已歸檔，pipeline 不再使用）
 
 **原理**：
 1. 用 YOLO bbox 長寬比判斷車輛姿態（aspect > 1.8 = 側向，< 1.3 = 正背面）
@@ -121,7 +121,7 @@ wheel_localization:
 
 **論文**：Vehiclenet: Large-scale 3D Vehicle Instance Segmentation in Urban Scenes (ICCV 2019 workshop)  
 **Repo**：`Vehicle_Key_Point_Orientation_Estimation`  
-**相關檔案**：`trafficlab/keypoint/model.py`、`trafficlab/keypoint/inference.py`、`scripts/eval_keypoints.py`、`scripts/finetune_pirazh.py`、`trafficlab/keypoint/skope3d_dataset.py`  
+**相關檔案**：`trafficlab/keypoint/model.py`、`trafficlab/keypoint/inference.py`、`scripts/eval_pirazh.py`、`scripts/finetune_pirazh.py`、`trafficlab/keypoint/skope3d_dataset.py`  
 **Checkpoint**：`models/best_fine_kp_checkpoint.pth.tar`（Stage 2 原始）、`models/pirazh_skope3d_finetuned.pth.tar`（fine-tune 後，待產出）
 
 **架構**：
@@ -728,15 +728,15 @@ BEVHeight++（有 weights，先測）
 |------|------|
 | `trafficlab/motion/wheel_localization.py` | 輪胎定位法，`WheelLocalizer`、`WheelLocResult` |
 | `scripts/eval_wheel_localization.py` | 輪胎定位法 vs bbox 並排視覺化評估 |
-| `trafficlab/motion/bbox_heading.py` | Bbox 幾何朝向估算 |
+| `scripts/archive/bbox_heading.py` | Bbox 幾何朝向估算（已歸檔） |
 | `trafficlab/motion/kinematics.py` | TrackSmoother，運動向量朝向 |
 | `trafficlab/keypoint/model.py` | Pirazh 模型（已 port） |
 | `trafficlab/keypoint/inference.py` | Pirazh 推論，`PirazhDetector`、`heading_from_keypoints()` |
 | `trafficlab/keypoint/skope3d_dataset.py` | SKoPe3D Dataset adapter |
 | `trafficlab/projection/g_projection.py` | 座標投影，`cam_sat` 屬性 |
 | `trafficlab/inference/pipeline.py` | 主 pipeline，bbox heading fallback 在 ~line 275 |
-| `scripts/eval_bbox_heading.py` | Bbox 方向視覺化評估 |
-| `scripts/eval_keypoints.py` | Pirazh keypoint 視覺化評估 |
+| `scripts/archive/eval_bbox_heading.py` | Bbox 方向視覺化評估 |
+| `scripts/eval_pirazh.py` | Pirazh keypoint 視覺化評估 |
 | `scripts/eval_yaen.py` | YAEN 朝向評估 |
 | `scripts/eval_openpifpaf.py` | OpenPifPaf keypoint 評估 |
 | `scripts/finetune_pirazh.py` | Pirazh fine-tune（SKoPe3D） |

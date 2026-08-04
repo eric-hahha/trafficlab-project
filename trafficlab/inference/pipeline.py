@@ -9,7 +9,6 @@ from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
-from trafficlab.motion.bbox_heading import estimate_heading_from_bbox
 from trafficlab.io.replay_writer import ReplayWriter
 
 
@@ -314,20 +313,6 @@ class InferencePipeline:
                     corrected_sat_coords = k_res.get('corrected_position')
                     if corrected_sat_coords is not None:
                         sat_coords = corrected_sat_coords
-
-                # Bbox geometric fallback: use aspect-ratio + camera geometry
-                # when motion-based heading is unavailable (new track / no tid).
-                if heading is None:
-                    cam_pos = tuple(g_engine.cam_sat)
-                    _road_h = svg_h if tid is not None else (
-                        g_engine.get_svg_heading(sat_coords) if use_svg else None
-                    )
-                    bbox_est = estimate_heading_from_bbox(
-                        [bx1, by1, bx2, by2], sat_coords, cam_pos, road_heading=_road_h
-                    )
-                    if bbox_est is not None and bbox_est[1] >= 0.3:
-                        heading = bbox_est[0]
-                        is_def = True  # mark as non-motion heading
 
                 have_heading = (heading is not None)
                 if not have_heading: speed = 0.0
