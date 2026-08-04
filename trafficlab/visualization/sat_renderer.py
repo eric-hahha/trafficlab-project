@@ -9,7 +9,7 @@ from trafficlab.visualization.cctv_renderer import get_color_from_string
 
 # ApolloCar3D 24-keypoint order (matches scripts/eval_openpifpaf.py KEYPOINT_NAMES,
 # scripts/plot_reprojection_keypoints.py, and the p_sat / kp_sat index used by
-# trafficlab/motion/haware_localization.py).
+# trafficlab/motion/keypoints_openpifpaf.py).
 _KEYPOINT_NAMES = [
     'front_up_right', 'front_up_left', 'front_light_right', 'front_light_left',
     'front_low_right', 'front_low_left', 'central_up_left', 'front_wheel_left',

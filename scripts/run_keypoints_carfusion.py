@@ -8,7 +8,7 @@ images (CCTV left, satellite right).
 
 Usage:
     source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
-    python scripts/eval_carfusion_sat.py \\
+    python scripts/run_keypoints_carfusion.py \\
         --video location/test21/footage/test21-4.mp4 \\
         --weights models/carfusion_last.pt \\
         --g-proj  location/test21/G_projection_test21.json \\
@@ -32,9 +32,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trafficlab.projection.g_projection import GProjection
-from trafficlab.motion.haware_localization import _FALLBACK_DIMS
-from trafficlab.motion.carfusion_localization import (
-    CarFusionLocalizer,
+from trafficlab.motion.keypoints_openpifpaf import _FALLBACK_DIMS
+from trafficlab.motion.keypoints_carfusion import (
+    CarFusionKeypointsLocalizer,
     build_carfusion_template,
     KP_NAMES,
 )
@@ -280,7 +280,7 @@ def main():
 
     dims = _load_dims(g_proj_dir)
     template, kp_heights = build_carfusion_template(dims)
-    localizer = CarFusionLocalizer(g_engine, template, kp_heights, kp_conf=args.kp_conf)
+    localizer = CarFusionKeypointsLocalizer(g_engine, template, kp_heights, kp_conf=args.kp_conf)
 
     from ultralytics import YOLO
     print(f'Loading weights: {args.weights}')

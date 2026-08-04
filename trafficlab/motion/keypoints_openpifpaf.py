@@ -241,7 +241,7 @@ _EXCLUDE_FROM_MIDPOINT = frozenset([2, 3, 12, 13, 22, 23, 9, 17])
 
 
 @dataclass
-class HawareResult:
+class OpenPifPafKeypointsResult:
     sat_coords:  Optional[tuple]         # (x, y) sat-image pixels; None on failure
     heading:     Optional[float]         # degrees, 0=East 90=North; None if ambiguous/failed
     confidence:  float                   # 0–1
@@ -251,7 +251,7 @@ class HawareResult:
     method:      Optional[int] = None    # localize_reprojection only: 1/2/3 (see its docstring); None for localize()
 
 
-class HawareLocalizer:
+class OpenPifPafKeypointsLocalizer:
     """Localize a single vehicle from its 24 Apollo-24 keypoints.
 
     Algorithm (doc §3B):
@@ -267,7 +267,7 @@ class HawareLocalizer:
         self.kp_conf  = kp_conf
         self._s       = g_engine.px_per_m   # satellite pixels per metre
 
-    def localize(self, kp_24: np.ndarray) -> HawareResult:
+    def localize(self, kp_24: np.ndarray) -> OpenPifPafKeypointsResult:
         """Localize from a (24, 3) array of [x_img, y_img, conf] keypoints."""
         # Step 1 — project each confident keypoint to sat coords
         p_sat: dict[int, tuple] = {}
@@ -281,7 +281,7 @@ class HawareLocalizer:
 
         n = len(p_sat)
         if n < 2:
-            return HawareResult(
+            return OpenPifPafKeypointsResult(
                 sat_coords=None, heading=None, confidence=0.0,
                 n_keypoints=n, status='failed_insufficient_kp', p_sat=p_sat,
             )
@@ -317,7 +317,7 @@ class HawareLocalizer:
         rms    = float(np.sqrt(np.mean(np.sum((P - P_pred) ** 2, axis=1))))
         conf   = min(1.0, n / 8.0) * max(0.0, 1.0 - rms / (5.0 * s))
 
-        return HawareResult(
+        return OpenPifPafKeypointsResult(
             sat_coords=tuple(T_sat),
             heading=heading,
             confidence=conf,
@@ -326,7 +326,7 @@ class HawareLocalizer:
             p_sat=p_sat,
         )
 
-    def localize_reprojection(self, kp_24: np.ndarray) -> HawareResult:
+    def localize_reprojection(self, kp_24: np.ndarray) -> OpenPifPafKeypointsResult:
         """Geometric centerline-intersection localizer.
 
         Trusts PifPaf's keypoint pixel positions and labels directly (each
@@ -373,7 +373,7 @@ class HawareLocalizer:
 
         n = len(p_sat)
         if n < 2:
-            return HawareResult(
+            return OpenPifPafKeypointsResult(
                 sat_coords=None, heading=None, confidence=0.0,
                 n_keypoints=n, status='failed_insufficient_kp', p_sat=p_sat, method=3,
             )
@@ -466,7 +466,7 @@ class HawareLocalizer:
 
             center = _intersect(mid_lr, lr_dir, mid_fr, fr_dir)
             if center is None:
-                return HawareResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=1)
+                return OpenPifPafKeypointsResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=1)
 
             mid_world = mid_lr
             lr_body = self.template[[a, b]][:, [0, 2]]
@@ -502,13 +502,13 @@ class HawareLocalizer:
                 # includes the cue's own two points if not excluded — see write-up
             ]
             if not cross_points:
-                return HawareResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=2)
+                return OpenPifPafKeypointsResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=2)
             line2_point = np.mean(cross_points, axis=0)
             line2_dir = v_world                             # perpendicular to line1_dir by construction
 
             center = _intersect(mid_world, line1_dir, line2_point, line2_dir)
             if center is None:
-                return HawareResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=2)
+                return OpenPifPafKeypointsResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=2)
 
             if lr_pair is not None:
                 forward = _resolve_lr_forward(a, b, R)
@@ -521,9 +521,9 @@ class HawareLocalizer:
 
         else:
             # ---- Method 3: neither pair type visible ----
-            return HawareResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=3)
+            return OpenPifPafKeypointsResult(None, None, 0.0, n, 'failed_insufficient_kp', p_sat, method=3)
 
-        return HawareResult(
+        return OpenPifPafKeypointsResult(
             sat_coords=tuple(center),
             heading=heading,
             confidence=conf,

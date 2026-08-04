@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 
-from trafficlab.motion.haware_localization import _FALLBACK_DIMS, _TRACK_RATIO, _WHEELBASE_RATIO
+from trafficlab.motion.keypoints_openpifpaf import _FALLBACK_DIMS, _TRACK_RATIO, _WHEELBASE_RATIO
 
 KP_NAMES = [
     'wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr',
@@ -68,7 +68,7 @@ def build_carfusion_template(dims: dict) -> tuple:
 
 
 @dataclass
-class CarFusionResult:
+class CarFusionKeypointsResult:
     sat_coords:  Optional[tuple]
     heading:     Optional[float]
     confidence:  float
@@ -77,7 +77,7 @@ class CarFusionResult:
     kp_sat:      dict = field(default_factory=dict)
 
 
-class CarFusionLocalizer:
+class CarFusionKeypointsLocalizer:
     def __init__(self, g_engine, template: np.ndarray, kp_heights: list, kp_conf: float = 0.2):
         self.g_engine   = g_engine
         self.template   = template
@@ -85,7 +85,7 @@ class CarFusionLocalizer:
         self.kp_conf    = kp_conf
         self._s         = g_engine.px_per_m
 
-    def localize(self, kp_14: np.ndarray) -> CarFusionResult:
+    def localize(self, kp_14: np.ndarray) -> CarFusionKeypointsResult:
         """kp_14: (14,3) array [x_img, y_img, conf]."""
         kp_sat: dict[int, tuple] = {}
         for i in range(14):
@@ -96,7 +96,7 @@ class CarFusionLocalizer:
 
         n = len(kp_sat)
         if n < 2:
-            return CarFusionResult(None, None, 0.0, n, 'failed_insufficient_kp', kp_sat)
+            return CarFusionKeypointsResult(None, None, 0.0, n, 'failed_insufficient_kp', kp_sat)
 
         idx = list(kp_sat.keys())
         Q   = self.template[idx][:, [0, 2]] * self._s
@@ -110,10 +110,10 @@ class CarFusionLocalizer:
         heading = math.degrees(math.atan2(R[1, 1], -R[0, 1])) % 360.0
         z_vals  = self.template[idx, 2]
         if np.all(z_vals >= 0) or np.all(z_vals <= 0):
-            return CarFusionResult(tuple(T_sat), None, 0.0, n, 'ambiguous_heading', kp_sat)
+            return CarFusionKeypointsResult(tuple(T_sat), None, 0.0, n, 'ambiguous_heading', kp_sat)
 
         P_pred = (Q - qb) @ R.T + pb
         rms    = float(np.sqrt(np.mean(np.sum((P - P_pred)**2, axis=1))))
         conf   = min(1.0, n/8.0) * max(0.0, 1.0 - rms / (5.0 * self._s))
 
-        return CarFusionResult(tuple(T_sat), heading, conf, n, 'ok', kp_sat)
+        return CarFusionKeypointsResult(tuple(T_sat), heading, conf, n, 'ok', kp_sat)

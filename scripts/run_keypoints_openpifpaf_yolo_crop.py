@@ -3,7 +3,7 @@ Run h-aware 3D keypoint localization using pre-computed YOLO boxes as the
 crop + track-ID source, and output a TrafficLab replay JSON.
 
 This is a distinct cross-frame tracking method from geometric matching
-(scripts/eval_haware_replay.py --method geometric): instead of running YOLO
+(scripts/run_keypoints_openpifpaf.py --method geometric): instead of running YOLO
 live and bridging it to PifPaf's own instances via bbox IoU, this script
 takes a YOLO-produced replay JSON (car boxes + track_id, e.g. pipeline.py
 output) as ground truth for *both* the crop region and the id — PifPaf's
@@ -16,7 +16,7 @@ list — there is nothing to crop, so nothing is emitted.
 
 Usage:
     source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
-    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_yolo_crop.py \\
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf_yolo_crop.py \\
         --yolo-boxes-json /Users/eric/Desktop/test21-3sf.json.gz \\
         --g-proj location/test21/G_projection_test21.json
 """

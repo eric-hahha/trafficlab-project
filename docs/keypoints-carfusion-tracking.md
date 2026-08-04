@@ -2,7 +2,7 @@
 
 ## 背景
 
-`scripts/eval_carfusion_sat.py` 原本每幀對 CarFusion YOLOv8-Pose 模型做**單張獨立推論**（`yolo_model(frame, ...)`），輸出的 `tracked_id` 其實是 `det_id`——每幀從 1 重新遞增的流水號，跟上一幀的同一台車完全沒有對應關係。`tracked_id` 這個欄位在下游被廣泛消費（`trafficlab/visualization/sat_renderer.py`、`cctv_renderer.py`、`trafficlab/trajectory/plotting.py`、`smoothing.py`、`scripts/postprocess/postprocess.py` 等），全部假設它是跨幀不變的整數，原本的假 ID 會讓這些工具全部失效。
+`scripts/run_keypoints_carfusion.py` 原本每幀對 CarFusion YOLOv8-Pose 模型做**單張獨立推論**（`yolo_model(frame, ...)`），輸出的 `tracked_id` 其實是 `det_id`——每幀從 1 重新遞增的流水號，跟上一幀的同一台車完全沒有對應關係。`tracked_id` 這個欄位在下游被廣泛消費（`trafficlab/visualization/sat_renderer.py`、`cctv_renderer.py`、`trafficlab/trajectory/plotting.py`、`smoothing.py`、`scripts/postprocess/postprocess.py` 等），全部假設它是跨幀不變的整數，原本的假 ID 會讓這些工具全部失效。
 
 使用者確認 CarFusion 自己的 bbox 是準的，因此不需要自建 world-space tracker，改用 ultralytics 內建的 tracker（ByteTrack）。
 
@@ -12,7 +12,7 @@
 
 ### 涉及檔案
 
-- `scripts/eval_carfusion_sat.py`：主要改動
+- `scripts/run_keypoints_carfusion.py`：主要改動
 - `trafficlab/inference/bytetrack.yaml`：新增，pinned tracker 設定檔
 
 ### 推論方式改動
@@ -28,7 +28,7 @@ results = yolo_model.track(frame, conf=conf_thresh, persist=True,
 
 `result.boxes.id` 是跨幀持續的 track id（`None` 表示這幀沒有任何框被 tracker 接受）；`tid = int(track_ids[i]) if track_ids is not None else None`，寫入 `det_records['tracked_id']`，取代原本的 `det_id` 計數器。
 
-跟現有慣例一致：`trafficlab/inference/pipeline.py` 的主 pipeline 已經是這樣用 `model.track()` + `boxes.id`；`scripts/eval_haware_replay.py` 的 YOLO 橋接也是逐幀呼叫 `.track(frame, persist=True, ...)`。
+跟現有慣例一致：`trafficlab/inference/pipeline.py` 的主 pipeline 已經是這樣用 `model.track()` + `boxes.id`；`scripts/run_keypoints_openpifpaf.py` 的 YOLO 橋接也是逐幀呼叫 `.track(frame, persist=True, ...)`。
 
 ### 為什麼把 `bytetrack.yaml` 複製進專案
 
@@ -126,7 +126,7 @@ fuse_score: False         # 原預設 True
 
 | 檔案 | 用途 |
 |------|------|
-| `scripts/eval_carfusion_sat.py` | 主要改動：`.track()` 呼叫、`tracked_id` 寫入、per-id 上色 |
+| `scripts/run_keypoints_carfusion.py` | 主要改動：`.track()` 呼叫、`tracked_id` 寫入、per-id 上色 |
 | `trafficlab/inference/bytetrack.yaml` | pinned tracker 設定，門檻與 `fuse_score` 已調整 |
 | `trafficlab/inference/pipeline.py` | 主 pipeline 既有的 tracker 用法，本次改動參考的慣例來源 |
-| `scripts/eval_haware_replay.py` | haware 的 YOLO 橋接，逐幀 `.track()` 呼叫的既有先例 |
+| `scripts/run_keypoints_openpifpaf.py` | haware 的 YOLO 橋接，逐幀 `.track()` 呼叫的既有先例 |

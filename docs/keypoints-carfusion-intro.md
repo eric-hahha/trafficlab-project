@@ -31,7 +31,7 @@ YOLOv8-Pose 是 one-stage 模型，一次推論同時輸出：
 
 ### 呼叫方式
 
-`eval_carfusion_sat.py` 實際呼叫的是 `.track()`（見下方「跨幀追蹤」），會額外帶上 ByteTrack 的跨幀 ID；單純只看關鍵點/bbox 輸出的話，底層一樣是這組欄位：
+`run_keypoints_carfusion.py` 實際呼叫的是 `.track()`（見下方「跨幀追蹤」），會額外帶上 ByteTrack 的跨幀 ID；單純只看關鍵點/bbox 輸出的話，底層一樣是這組欄位：
 
 ```python
 from ultralytics import YOLO
@@ -190,7 +190,7 @@ T_sat = pb - R @ qb
 forward_sat = R @ [0, -1]^T = [-R[0,1], -R[1,1]]
 ```
 
-朝向角定義（與 haware_localization.py 一致）：
+朝向角定義（與 keypoints_openpifpaf.py 一致）：
 
 ```python
 heading = math.degrees(math.atan2(R[1, 1], -R[0, 1])) % 360.0
@@ -228,7 +228,7 @@ confidence = min(1.0, n/8.0) * max(0.0, 1.0 - rms / (5.0 * px_per_m))
 
 ```python
 @dataclass
-class CarFusionResult:
+class CarFusionKeypointsResult:
     sat_coords:  Optional[tuple]   # (sat_x, sat_y) 衛星像素座標；失敗時為 None
     heading:     Optional[float]   # 0–360 度；朝向不明時為 None
     confidence:  float             # 0–1
@@ -241,16 +241,16 @@ class CarFusionResult:
 
 ## 跨幀追蹤（ByteTrack）
 
-`CarFusionResult`／Procrustes SVD 本身不處理跨幀身份，那是每幀各自獨立算出來的。跨幀 `tracked_id` 是在 `eval_carfusion_sat.py` 這一層另外加上去的：改用 ultralytics 的 `model.track()`（見上方「呼叫方式」），搭配專案內 pinned 的 `trafficlab/inference/bytetrack.yaml`（門檻降到 `0.01`、`fuse_score: False`，理由跟踩過的坑都記在 `docs/carfusion-tracking.md`，這裡不重複）。
+`CarFusionKeypointsResult`／Procrustes SVD 本身不處理跨幀身份，那是每幀各自獨立算出來的。跨幀 `tracked_id` 是在 `run_keypoints_carfusion.py` 這一層另外加上去的：改用 ultralytics 的 `model.track()`（見上方「呼叫方式」），搭配專案內 pinned 的 `trafficlab/inference/bytetrack.yaml`（門檻降到 `0.01`、`fuse_score: False`，理由跟踩過的坑都記在 `docs/keypoints-carfusion-tracking.md`，這裡不重複）。
 
-`detections.json` 因此比 `CarFusionResult` 多出幾類欄位：
+`detections.json` 因此比 `CarFusionKeypointsResult` 多出幾類欄位：
 
 - 每個偵測物件：`tracked_id`、`bbox_2d`、`have_heading`、`have_measurements`、`sat_floor_box`、`bbox_3d`——後三個是為了讓 `trafficlab/gui/tabs/tab_visualization.py` 能畫出 3D 框跟衛星地板多邊形，算法跟 `trafficlab/inference/pipeline.py` 一致（同一段旋轉矩陣公式）。
 - 頂層：`mp4_path`、`meta.{resolution,fps}`、`location_code`、`mp4_frame_count`、`animation_frame_count`，同樣是為了 GUI 播放器相容而加。
 
 一個已修正的細節：`sat_floor_box`/`bbox_3d` 的旋轉方向曾經跟 CarFusion 自己的 heading 定義（90°=北/螢幕上方）搭配錯誤——套用的是 `pipeline.py` 那套「90°=螢幕下方」的旋轉公式，兩者只在正東西向時碰巧一致，其餘方向都是上下鏡射。現在 `_floor_and_3d_box()` 會先把 heading 取負號再旋轉，跟 `_draw_arrow()` 畫箭頭時的翻轉一致。
 
-想知道完整的除錯過程（ByteTrack 內部機制、門檻/`fuse_score` 怎麼決定、每次改動的實際測試數字），看 `docs/carfusion-tracking.md`；這份文件只保留跟「CarFusion 是什麼、怎麼運作」直接相關的重點。
+想知道完整的除錯過程（ByteTrack 內部機制、門檻/`fuse_score` 怎麼決定、每次改動的實際測試數字），看 `docs/keypoints-carfusion-tracking.md`；這份文件只保留跟「CarFusion 是什麼、怎麼運作」直接相關的重點。
 
 ---
 
@@ -260,7 +260,7 @@ class CarFusionResult:
 
 ```bash
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
-python scripts/eval_carfusion_sat.py \
+python scripts/run_keypoints_carfusion.py \
     --video   location/test21/footage/test21-4.mp4 \
     --weights models/carfusion_last.pt \
     --g-proj  location/test21/G_projection_test21.json \
@@ -286,20 +286,20 @@ python scripts/eval_carfusion_sat.py \
 
 | 檔案 | 用途 |
 |------|------|
-| `trafficlab/motion/carfusion_localization.py` | `CarFusionLocalizer` 類別、`build_carfusion_template()` |
-| `scripts/eval_carfusion_sat.py` | 評估腳本，並排輸出，跨幀追蹤與 GUI 相容欄位 |
+| `trafficlab/motion/keypoints_carfusion.py` | `CarFusionKeypointsLocalizer` 類別、`build_carfusion_template()` |
+| `scripts/run_keypoints_carfusion.py` | 評估腳本，並排輸出，跨幀追蹤與 GUI 相容欄位 |
 | `scripts/eval_carfusion.py` | 純關鍵點視覺化（不計算衛星座標） |
 | `scripts/patch_carfusion_replay_fields.py` | 幫舊版 `detections.json` 原地補上 GUI 相容欄位，不用重跑 |
 | `trafficlab/inference/bytetrack.yaml` | pinned ByteTrack 設定 |
-| `trafficlab/motion/haware_localization.py` | 相同演算法的 Apollo-24 版本（參考） |
-| `docs/carfusion-tracking.md` | ByteTrack 整合過程、除錯細節、各版本設定的測試數字 |
+| `trafficlab/motion/keypoints_openpifpaf.py` | 相同演算法的 Apollo-24 版本（參考） |
+| `docs/keypoints-carfusion-tracking.md` | ByteTrack 整合過程、除錯細節、各版本設定的測試數字 |
 
 ---
 
 
 ## 與 haware 的比較
 
-`haware_localization.py` 和 `carfusion_localization.py` 使用完全相同的核心演算法（Procrustes SVD），差異在偵測前段和關鍵點定義。
+`keypoints_openpifpaf.py` 和 `keypoints_carfusion.py` 使用完全相同的核心演算法（Procrustes SVD），差異在偵測前段和關鍵點定義。
 
 ### 架構差異
 
@@ -345,11 +345,11 @@ CarFusion 多了 **4 個車頂角點**（roof_fl/fr/rl/rr），覆蓋前後兩�
 
 ### 核心演算法：完全相同
 
-SVD 配準、朝向公式、ambiguous 判斷、信心值計算，兩個 localizer 的程式碼邏輯一模一樣。CarFusion localizer 直接繼承 `haware_localization.py` 匯出的 `_FALLBACK_DIMS`、`_TRACK_RATIO`、`_WHEELBASE_RATIO`。
+SVD 配準、朝向公式、ambiguous 判斷、信心值計算，兩個 localizer 的程式碼邏輯一模一樣。CarFusion localizer 直接繼承 `keypoints_openpifpaf.py` 匯出的 `_FALLBACK_DIMS`、`_TRACK_RATIO`、`_WHEELBASE_RATIO`。
 
 ```python
-# carfusion_localization.py 繼承自 haware_localization.py
-from trafficlab.motion.haware_localization import _FALLBACK_DIMS, _TRACK_RATIO, _WHEELBASE_RATIO
+# keypoints_carfusion.py 繼承自 keypoints_openpifpaf.py
+from trafficlab.motion.keypoints_openpifpaf import _FALLBACK_DIMS, _TRACK_RATIO, _WHEELBASE_RATIO
 ```
 
-實測數字（不同測試影片、加入 ByteTrack 前後的對照）都在 `docs/carfusion-tracking.md`，這裡不重複維護，避免兩份文件的數字之後對不上。
+實測數字（不同測試影片、加入 ByteTrack 前後的對照）都在 `docs/keypoints-carfusion-tracking.md`，這裡不重複維護，避免兩份文件的數字之後對不上。

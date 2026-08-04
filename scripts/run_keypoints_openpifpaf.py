@@ -14,7 +14,7 @@ only decides which one actually runs this invocation.
 
 Usage:
     source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
-    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/eval_haware_replay.py \\
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \\
         --video location/test21/footage/test21-4.mp4 \\
         --g-proj location/test21/G_projection_test21.json \\
         --method geometric \\
@@ -34,8 +34,8 @@ import PIL.Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from trafficlab.projection.g_projection import GProjection
-from trafficlab.motion.haware_localization import (
-    HawareLocalizer,
+from trafficlab.motion.keypoints_openpifpaf import (
+    OpenPifPafKeypointsLocalizer,
     build_car_template,
     compute_car_dims_from_spec_csv,
     _FALLBACK_DIMS,
@@ -211,7 +211,7 @@ def main():
                         help='procrustes = closed-form 2D Procrustes on lifted sat coords '
                              '(default); reprojection = fit the 3D template directly against '
                              'PifPaf pixel positions via nonlinear least-squares '
-                             '(HawareLocalizer.localize_reprojection)')
+                             '(OpenPifPafKeypointsLocalizer.localize_reprojection)')
     args = parser.parse_args()
 
     if args.method == 'geometric' and not args.yolo and not args.yolo_boxes_json:
@@ -251,7 +251,7 @@ def main():
             print(f'[haware] Using built-in fallback dims: {dims}')
 
     template = build_car_template(dims)
-    localizer = HawareLocalizer(g_engine, template, kp_conf=args.kp_conf)
+    localizer = OpenPifPafKeypointsLocalizer(g_engine, template, kp_conf=args.kp_conf)
     px_m = g_engine.px_per_m
 
     # --- OpenPifPaf ---
