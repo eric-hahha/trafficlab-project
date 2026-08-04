@@ -262,7 +262,7 @@ existed, without re-running detection/tracking:
 
 ```bash
 source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
-python scripts/patch_carfusion_replay_fields.py \
+python scripts/archive/patch_carfusion_replay_fields.py \
   --json /path/to/detections.json \
   --video location/test21/footage/test21-4.mp4 \
   --g-proj location/test21/G_projection_test21.json
