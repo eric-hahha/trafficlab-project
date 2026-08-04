@@ -271,8 +271,7 @@ class TrajectoryPlotter:
                             arrowstyle="->",
                             color=color,
                             lw=0.8,
-                            alpha=0.75,
-                            mutation_scale=10,
+                            mutation_scale=6,
                         ),
                         zorder=4,
                     )
@@ -570,5 +569,5 @@ class TrajectoryPlotter:
                 ]
             )
         if show_heading_arrows:
-            lines.append("  arrow: heading")
+            lines.extend(["", "Legend:", "  arrow: heading"])
         return "\n".join(lines)
