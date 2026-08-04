@@ -15,10 +15,13 @@ dependencies:
   - zlib
   - pip:
       - "numpy<2"
+      - Pillow
       - "opencv-python<4.10"
-      - torch
-      - torchvision
-      - torchaudio
+      - scipy
+      - openpifpaf==0.13.11
+      - torch==2.2.2
+      - torchvision==0.17.2
+      - torchaudio==2.2.2
       - ultralytics
       - PyQt5
       - pyqtdarktheme
@@ -28,4 +31,3 @@ dependencies:
       - filterpy
       - pyyaml
       - pandas
-      - scipy
