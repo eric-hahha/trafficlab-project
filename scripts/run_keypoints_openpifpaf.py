@@ -4,12 +4,22 @@ Run h-aware 3D keypoint localization and output a TrafficLab replay JSON.
 Identical detection loop to eval_haware.py, but writes a .json.gz in the
 standard TrafficLab replay format so results can be loaded in the GUI.
 
---method selects one of two mutually exclusive per-frame strategies:
-    geometric  Bridge PifPaf detections to YOLO track IDs via bbox IoU.
-               Reads --yolo / --yolo-classes / --yolo-conf / --iou-threshold.
-    crop       Crop each Pass-1 bbox and re-run PifPaf on the crop to recover
-               more confident keypoints. Reads --crop-redetect / --crop-padding.
-Both strategies' own flags keep their existing meaning and defaults; --method
+--method selects one of three mutually exclusive per-frame strategies:
+    geometric     Bridge PifPaf detections to YOLO track IDs via bbox IoU.
+                  Reads --yolo / --yolo-classes / --yolo-conf / --iou-threshold.
+    crop          Crop each Pass-1 bbox and re-run PifPaf on the crop to recover
+                  more confident keypoints. Reads --crop-redetect / --crop-padding.
+    segmentation  Merge PifPaf fragments that belong to the same vehicle using
+                  car-segmenter instance masks instead of a bbox-IoU heuristic —
+                  fixes cases geometric's single-keypoint recovery can't (two
+                  multi-keypoint fragments split from one vehicle). Uses
+                  car-segmenter's own tracker for tracked_id, not YOLO.
+                  Reads --seg-model / --seg-conf / --seg-device, or
+                  --seg-masks-json to reuse a record_car_masks.py file instead
+                  of running car-segmenter live (e.g. when the same video also
+                  needs a --localizer reprojection pass and shouldn't pay for
+                  YOLO11-seg inference twice).
+Each strategy's own flags keep their existing meaning and defaults; --method
 only decides which one actually runs this invocation.
 
 Usage:
@@ -27,6 +37,7 @@ import math
 import os
 import re
 import sys
+from collections import Counter
 
 import cv2
 import numpy as np
@@ -61,6 +72,55 @@ def _sat_floor_box(sat_coords, heading_deg: float, dims: dict, px_m: float):
     corners = np.array([[dx, dy], [dx, -dy], [-dx, -dy], [-dx, dy]])
     R = np.array([[c, -s], [s, c]])
     return (corners @ R.T + np.array(sat_coords)).tolist()
+
+
+def _localize_and_assemble(kp_24, obj_id, tracked_id, bbox_2d, localizer, localizer_name, dims, px_m):
+    """Run the localizer on kp_24 and assemble one frame_objects entry.
+
+    Shared by every --method branch so the output schema stays identical
+    regardless of how kp_24/tracked_id/bbox_2d were derived (raw PifPaf
+    annotation, YOLO-bridged, or segmentation-merged).
+    Returns (obj_dict, result.status).
+    """
+    if localizer_name == 'reprojection':
+        result = localizer.localize_reprojection(kp_24)
+    else:
+        result = localizer.localize(kp_24)
+
+    sat_coords = list(result.sat_coords) if result.sat_coords is not None else None
+    have_heading = result.heading is not None
+
+    sfb = None
+    if have_heading and sat_coords is not None:
+        sfb = _sat_floor_box(sat_coords, result.heading, dims, px_m)
+
+    obj = {
+        'id':               obj_id,
+        'tracked_id':       tracked_id,
+        'class':            'car',
+        'confidence':       result.confidence,
+        'bbox_2d':          list(bbox_2d) if bbox_2d is not None else None,
+        'reference_point':  None,
+        'sat_coords':       sat_coords,
+        'have_heading':     have_heading,
+        'have_measurements': True,
+        'default_heading':  False,
+        'heading':          result.heading,
+        'speed_kmh':        0.0,
+        'sat_floor_box':    sfb,
+        'bbox_3d':          None,
+        # h-aware diagnostic fields
+        'n_keypoints':      result.n_keypoints,
+        'status':           result.status,
+        'method':           result.method,
+        # raw CCTV keypoints [x, y, conf] × 24 for overlay rendering
+        'kp_cctv':          kp_24.tolist(),
+        # per-keypoint sat-plane projection, same indexing as kp_cctv;
+        # null where that keypoint wasn't confident enough to lift
+        'kp_sat':           [list(result.p_sat[i]) if i in result.p_sat else None
+                             for i in range(24)],
+    }
+    return obj, result.status
 
 
 def _kp_bbox_xyxy(kp_24: np.ndarray, kp_conf: float):
@@ -122,10 +182,13 @@ def _match_by_bbox_iou(pifpaf_boxes, yolo_boxes, yolo_tids, iou_threshold=0.3):
     return tracked_ids, matched_boxes
 
 
-def _load_yolo_boxes_json(path: str, car_class: str) -> dict:
+def _load_yolo_boxes_json(path: str, car_class: str) -> tuple:
     """Load a pre-computed replay JSON (e.g. from a separate YOLO run) and return
-    {frame_index: (boxes_xyxy, track_ids)}, filtered to car_class — an alternative
-    YOLO box source for --method geometric IoU matching, in place of a live model."""
+    ({frame_index: (boxes_xyxy, track_ids)}, source_meta), filtered to car_class —
+    an alternative YOLO box source for --method geometric IoU matching, in place
+    of a live model. source_meta carries whatever provenance the replay file
+    itself records (only meta.config_name today) so run_config can reflect the
+    actual box source instead of the (unused) --yolo/--yolo-classes defaults."""
     opener = gzip.open if path.endswith('.gz') else open
     with opener(path, 'rt') as f:
         data = json.load(f)
@@ -136,7 +199,28 @@ def _load_yolo_boxes_json(path: str, car_class: str) -> dict:
             boxes = [tuple(o['bbox_2d']) for o in cars]
             tids  = [o.get('tracked_id') for o in cars]
             by_frame[fr['frame_index']] = (boxes, tids)
-    return by_frame
+    source_meta = {'config_name': data.get('meta', {}).get('config_name')}
+    return by_frame, source_meta
+
+
+def _load_seg_masks_json(path: str) -> tuple:
+    """Load a record_car_masks.py output file and return
+    ({frame_index: records}, source_meta), each record {'tracker_id', 'bbox_xyxy',
+    'confidence', 'polygon'} — an alternative car-segmenter source for --method
+    segmentation, in place of running the model live. source_meta carries the
+    seg_model/seg_conf/seg_device record_car_masks.py recorded at capture time,
+    so run_config can reflect the model that actually produced these instances
+    instead of the (unused) --seg-model/--seg-conf/--seg-device defaults."""
+    opener = gzip.open if path.endswith('.gz') else open
+    with opener(path, 'rt') as f:
+        data = json.load(f)
+    by_frame = {fr['frame_index']: fr['instances'] for fr in data['frames']}
+    source_meta = {
+        'seg_model':  data.get('seg_model'),
+        'seg_conf':   data.get('seg_conf'),
+        'seg_device': data.get('seg_device'),
+    }
+    return by_frame, source_meta
 
 
 def _extract_yolo(results) -> tuple:
@@ -171,11 +255,13 @@ def main():
                         help='PifPaf instance score threshold (default 0.01)')
     parser.add_argument('--seed-threshold',   type=float, default=0.01,
                         help='PifPaf CIF seed threshold (default 0.01)')
-    parser.add_argument('--method', required=True, choices=['geometric', 'crop'],
+    parser.add_argument('--method', required=True, choices=['geometric', 'crop', 'segmentation'],
                         help='geometric = bridge to YOLO track IDs via bbox IoU '
                              '(reads --yolo*/--iou-threshold); '
                              'crop = crop-and-redetect for better keypoints '
-                             '(reads --crop-redetect/--crop-padding). Mutually exclusive: '
+                             '(reads --crop-redetect/--crop-padding); '
+                             'segmentation = merge PifPaf fragments via car-segmenter '
+                             'instance masks (reads --seg-*). Mutually exclusive: '
                              'only the selected strategy runs.')
     parser.add_argument('--crop-redetect', action='store_true',
                         help='Crop each Pass-1 bbox with 50%% padding and re-run PifPaf '
@@ -202,6 +288,22 @@ def main():
                              '--yolo-classes are ignored.')
     parser.add_argument('--yolo-boxes-class', default='car',
                         help='class value in --yolo-boxes-json to treat as a car (default "car")')
+    # segmentation matching: car-segmenter instance masks (only when --method segmentation)
+    parser.add_argument('--seg-model', default='yolo11n-seg.pt',
+                        help='Ultralytics *-seg checkpoint for car-segmenter (default yolo11n-seg.pt); '
+                             'auto-downloaded on first use if not present locally')
+    parser.add_argument('--seg-conf', type=float, default=0.3,
+                        help='car-segmenter detection confidence threshold (default 0.3)')
+    parser.add_argument('--seg-device', default=None,
+                        help='"cuda" / "mps" / "cpu", or leave unset to let ultralytics pick')
+    parser.add_argument('--seg-masks-json', default=None,
+                        help='Path to a record_car_masks.py output file supplying per-frame car '
+                             'instances (tracker_id/bbox/mask polygon), used as the segmentation '
+                             'source for --method segmentation instead of running car-segmenter '
+                             'live. When set, --seg-model/--seg-conf/--seg-device are ignored and '
+                             'car-segmenter is never loaded — use this so a video that needs both '
+                             '--localizer procrustes and --localizer reprojection passes doesn\'t '
+                             'pay for YOLO11-seg inference twice.')
     parser.add_argument('--start-frame', type=int, default=0,
                         help='First frame index to process (default 0). Frames before this '
                              'are read and discarded, not seeked — CAP_PROP_POS_FRAMES '
@@ -273,8 +375,10 @@ def main():
     yolo_model = None
     yolo_classes = None
     yolo_boxes_by_frame = None
+    yolo_source_meta = None
     if args.method == 'geometric' and args.yolo_boxes_json:
-        yolo_boxes_by_frame = _load_yolo_boxes_json(args.yolo_boxes_json, args.yolo_boxes_class)
+        yolo_boxes_by_frame, yolo_source_meta = _load_yolo_boxes_json(
+            args.yolo_boxes_json, args.yolo_boxes_class)
         n_loaded = sum(len(v[0]) for v in yolo_boxes_by_frame.values())
         print(f'[haware] Loaded {n_loaded} "{args.yolo_boxes_class}" boxes across '
               f'{len(yolo_boxes_by_frame)} frames from {args.yolo_boxes_json} '
@@ -286,6 +390,68 @@ def main():
             yolo_classes = [int(c) for c in args.yolo_classes.split(',')]
         cls_str = str(yolo_classes) if yolo_classes else 'all'
         print(f'[haware] YOLO model loaded: {args.yolo} classes={cls_str} (IoU threshold={args.iou_threshold})')
+
+    # --- car-segmenter mask source (only loaded for --method segmentation) ---
+    # Either a live model (--seg-model, the default) or a pre-recorded
+    # record_car_masks.py file (--seg-masks-json) — the latter skips loading
+    # car-segmenter entirely, so a video that needs both --localizer
+    # procrustes and --localizer reprojection passes doesn't run YOLO11-seg
+    # twice. Both sources converge on the same per-frame record shape
+    # ({'tracker_id','bbox_xyxy','confidence','polygon'}), but matching
+    # keypoints against them uses two different implementations (dense mask
+    # for the live source, polygon for the loaded one — see
+    # assign_predictions_to_masks vs assign_predictions_to_polygons).
+    mask_source = None
+    seg_records_by_frame = None
+    seg_source_meta = None
+    if args.method == 'segmentation':
+        from trafficlab.motion.segmentation_car import (
+            assign_predictions_to_masks, assign_predictions_to_polygons, merge_keypoints_by_group,
+        )
+        if args.seg_masks_json:
+            seg_records_by_frame, seg_source_meta = _load_seg_masks_json(args.seg_masks_json)
+            n_loaded = sum(len(v) for v in seg_records_by_frame.values())
+            print(f'[haware] Loaded {n_loaded} car-segmenter instances across '
+                  f'{len(seg_records_by_frame)} frames from {args.seg_masks_json} '
+                  f'(car-segmenter not loaded — --seg-model/--seg-conf/--seg-device ignored)')
+        else:
+            from trafficlab.motion.segmentation_car import CarMaskSource
+            mask_source = CarMaskSource(model_path=args.seg_model, confidence=args.seg_conf,
+                                         device=args.seg_device)
+            print(f'[haware] car-segmenter loaded: {args.seg_model} conf={args.seg_conf} '
+                  f'device={args.seg_device or "auto"}')
+
+    # --- run_config.detector: which box/mask source this run actually used ---
+    # Not simply echoing --yolo*/--seg-* CLI defaults: those weren't loaded at
+    # all on the replay branches, so the real model identity there has to come
+    # from the replay file's own recorded metadata instead.
+    if args.method == 'geometric' and yolo_boxes_by_frame is not None:
+        detector_info = {
+            'source': 'replay', 'path': args.yolo_boxes_json,
+            'iou_threshold': args.iou_threshold,
+            'source_config_name': yolo_source_meta.get('config_name'),
+        }
+    elif args.method == 'geometric' and yolo_model is not None:
+        detector_info = {
+            'source': 'live', 'model': args.yolo, 'conf': args.yolo_conf,
+            'iou_threshold': args.iou_threshold,
+        }
+    elif args.method == 'geometric':
+        detector_info = {'source': None}
+    elif args.method == 'crop':
+        detector_info = {'crop_redetect': args.crop_redetect, 'crop_padding': args.crop_padding}
+    elif seg_records_by_frame is not None:
+        detector_info = {
+            'source': 'replay', 'path': args.seg_masks_json,
+            'recorded_model':  seg_source_meta.get('seg_model'),
+            'recorded_conf':   seg_source_meta.get('seg_conf'),
+            'recorded_device': seg_source_meta.get('seg_device'),
+        }
+    else:
+        detector_info = {
+            'source': 'live', 'model': args.seg_model, 'conf': args.seg_conf,
+            'device': args.seg_device,
+        }
 
     # --- Video metadata ---
     cap   = cv2.VideoCapture(args.video)
@@ -311,6 +477,12 @@ def main():
         'location_code':        location_code,
         'mp4_frame_count':      total,
         'animation_frame_count': 0,
+        'run_config': {
+            'checkpoint': args.checkpoint,
+            'method':     args.method,
+            'localizer':  args.localizer,
+            'detector':   detector_info,
+        },
         'frames':               [],
     }
 
@@ -324,6 +496,21 @@ def main():
     matched_tid_frames: dict = {}    # tid → frames PifPaf matched it
     no_pifpaf_tid_frames: dict = {}  # tid → YOLO saw it but PifPaf detected nothing
     no_match_tid_frames: dict = {}   # tid → PifPaf detected but IoU match failed
+    # --method segmentation stats
+    n_seg_frames = 0        # frames where car-segmenter found >=1 instance
+    n_seg_instances = 0     # total car-segmenter instances across all frames
+    n_seg_no_pifpaf = 0     # segmented instances with no PifPaf keypoint inside them
+    n_merge_events = 0      # groups where >=2 PifPaf fragments merged into one instance
+
+    def _update_status_counters(status):
+        nonlocal n_ok, n_ambig, n_fail
+        if status == 'ok':
+            n_ok += 1
+        elif status == 'ambiguous_heading':
+            n_ambig += 1
+        else:
+            n_fail += 1
+
     print(f'Processing frames {start}..{limit - 1} ({limit - start}/{total}) → {out_path}')
 
     for frame_idx in range(limit):
@@ -440,77 +627,94 @@ def main():
                     no_pifpaf_tid_frames[yt] = no_pifpaf_tid_frames.get(yt, 0) + 1
 
         frame_objects = []
-        for j, ann in enumerate(predictions):
-            n_det += 1
-
-            # crop-and-redetect (--method crop only): crop around Pass-1 bbox and re-detect
-            # kp_override (--method geometric only): use the merged keypoints when this
-            # detection absorbed a stray single-keypoint match (see geometric matching above)
-            kp_24 = kp_override.get(j, ann.data)
-            if args.method == 'crop' and args.crop_redetect:
-                bx, by, bw, bh = ann.bbox()
-                pad_x, pad_y = bw * args.crop_padding, bh * args.crop_padding
-                x0 = max(0, int(bx - pad_x))
-                y0 = max(0, int(by - pad_y))
-                x1 = min(W, int(bx + bw + pad_x))
-                y1 = min(H, int(by + bh + pad_y))
-                if x1 > x0 and y1 > y0:
-                    try:
-                        crop_preds, _, _ = predictor.pil_image(pil.crop((x0, y0, x1, y1)))
-                    except Exception:
-                        crop_preds = []
-                    if crop_preds:
-                        best = max(crop_preds,
-                                   key=lambda a: sum(1 for kp in a.data if kp[2] >= args.kp_conf))
-                        kp_24 = best.data.copy()
-                        kp_24[:, 0] += x0
-                        kp_24[:, 1] += y0
-
-            if args.localizer == 'reprojection':
-                result = localizer.localize_reprojection(kp_24)
+        if args.method == 'segmentation':
+            # --- segmentation matching: merge PifPaf fragments via car-segmenter masks ---
+            # Two sources, two matching implementations (see the loading block
+            # above for why): --seg-masks-json loads per-frame records and
+            # matches by polygon; otherwise the live model is queried and
+            # matched by dense mask, exactly as before.
+            if seg_records_by_frame is not None:
+                records = seg_records_by_frame.get(frame_idx, [])
+                polygons = [r['polygon'] for r in records]
+                group_of = assign_predictions_to_polygons(predictions, polygons, args.kp_conf)
+                n_instances_this_frame = len(records)
             else:
-                result = localizer.localize(kp_24)
+                seg_dets = mask_source.detect(frame)
+                masks = seg_dets.mask if seg_dets.mask is not None else np.zeros((0, H, W), dtype=bool)
+                group_of = assign_predictions_to_masks(predictions, masks, args.kp_conf)
+                n_instances_this_frame = masks.shape[0]
 
-            sat_coords = list(result.sat_coords) if result.sat_coords is not None else None
-            have_heading = result.heading is not None
+            merged, leftover = merge_keypoints_by_group(predictions, group_of, args.kp_conf)
 
-            sfb = None
-            if have_heading and sat_coords is not None:
-                sfb = _sat_floor_box(sat_coords, result.heading, dims, px_m)
+            n_seg_instances += n_instances_this_frame
+            n_seg_no_pifpaf += n_instances_this_frame - len(merged)
+            if n_instances_this_frame:
+                n_seg_frames += 1
+            group_counts = Counter(g for g in group_of if g is not None)
+            n_merge_events += sum(1 for c in group_counts.values() if c >= 2)
 
-            if result.status == 'ok':
-                n_ok += 1
-            elif result.status == 'ambiguous_heading':
-                n_ambig += 1
-            else:
-                n_fail += 1
+            obj_id = 0
+            for g, kp_24 in merged.items():
+                n_det += 1
+                if seg_records_by_frame is not None:
+                    tid = records[g]['tracker_id']
+                    bbox_2d = tuple(records[g]['bbox_xyxy'])
+                else:
+                    tid = None
+                    if seg_dets.tracker_id is not None and seg_dets.tracker_id[g] >= 0:
+                        tid = int(seg_dets.tracker_id[g])
+                    bbox_2d = tuple(float(v) for v in seg_dets.xyxy[g])
+                obj, status = _localize_and_assemble(
+                    kp_24, obj_id, tid, bbox_2d, localizer, args.localizer, dims, px_m)
+                _update_status_counters(status)
+                frame_objects.append(obj)
+                obj_id += 1
 
-            frame_objects.append({
-                'id':               j,
-                'tracked_id':       tracked_ids[j],
-                'class':            'car',
-                'confidence':       result.confidence,
-                'bbox_2d':          list(bbox_2d_list[j]) if bbox_2d_list[j] is not None else None,
-                'reference_point':  None,
-                'sat_coords':       sat_coords,
-                'have_heading':     have_heading,
-                'have_measurements': True,
-                'default_heading':  False,
-                'heading':          result.heading,
-                'speed_kmh':        0.0,
-                'sat_floor_box':    sfb,
-                'bbox_3d':          None,
-                # h-aware diagnostic fields
-                'n_keypoints':      result.n_keypoints,
-                'status':           result.status,
-                'method':           result.method,
-                # raw CCTV keypoints [x, y, conf] × 24 for overlay rendering
-                'kp_cctv':          kp_24.tolist(),
-                # per-keypoint sat-plane projection, same indexing as kp_cctv;
-                # null where that keypoint wasn't confident enough to lift
-                'kp_sat':           [list(result.p_sat[i]) if i in result.p_sat else None
-                                     for i in range(24)],
-            })
+            # Fragments whose keypoints didn't fall inside any car-segmenter mask
+            # (segmentation missed that vehicle, or the fragment is spurious) —
+            # kept, not dropped, tagged the same way geometric tags an unmatched
+            # PifPaf detection: its own per-frame index offset by 500.
+            for j in leftover:
+                n_det += 1
+                kp_24 = predictions[j].data
+                bbox_2d = _kp_bbox_xyxy(kp_24, args.kp_conf)
+                obj, status = _localize_and_assemble(
+                    kp_24, obj_id, j + 500, bbox_2d, localizer, args.localizer, dims, px_m)
+                _update_status_counters(status)
+                frame_objects.append(obj)
+                obj_id += 1
+        else:
+            for j, ann in enumerate(predictions):
+                n_det += 1
+
+                # crop-and-redetect (--method crop only): crop around Pass-1 bbox and re-detect
+                # kp_override (--method geometric only): use the merged keypoints when this
+                # detection absorbed a stray single-keypoint match (see geometric matching above)
+                kp_24 = kp_override.get(j, ann.data)
+                if args.method == 'crop' and args.crop_redetect:
+                    bx, by, bw, bh = ann.bbox()
+                    pad_x, pad_y = bw * args.crop_padding, bh * args.crop_padding
+                    x0 = max(0, int(bx - pad_x))
+                    y0 = max(0, int(by - pad_y))
+                    x1 = min(W, int(bx + bw + pad_x))
+                    y1 = min(H, int(by + bh + pad_y))
+                    if x1 > x0 and y1 > y0:
+                        try:
+                            crop_preds, _, _ = predictor.pil_image(pil.crop((x0, y0, x1, y1)))
+                        except Exception:
+                            crop_preds = []
+                        if crop_preds:
+                            best = max(crop_preds,
+                                       key=lambda a: sum(1 for kp in a.data if kp[2] >= args.kp_conf))
+                            kp_24 = best.data.copy()
+                            kp_24[:, 0] += x0
+                            kp_24[:, 1] += y0
+
+                bbox_2d = bbox_2d_list[j]
+                obj, status = _localize_and_assemble(
+                    kp_24, j, tracked_ids[j], bbox_2d, localizer, args.localizer, dims, px_m)
+                _update_status_counters(status)
+                frame_objects.append(obj)
 
         out_data['frames'].append({'frame_index': frame_idx, 'objects': frame_objects})
 
@@ -548,6 +752,11 @@ def main():
                 nm  = no_match_tid_frames.get(tid, 0)
                 ratio = 100 * mf / yf if yf > 0 else 0.0
                 print(f'  {tid:>4}  {yf:>6}  {mf:>6}  {np_:>8}  {nm:>7}  {ratio:>5.1f}%')
+    if args.method == 'segmentation':
+        print(f'  segmentation frames: {n_seg_frames}/{n_frames_processed}  '
+              f'instances: {n_seg_instances}')
+        print(f'  merge events (>=2 PifPaf fragments → 1 instance): {n_merge_events}')
+        print(f'  segmented-but-no-PifPaf-keypoints (not output): {n_seg_no_pifpaf}/{n_seg_instances}')
     print(f'Saved → {out_path}')
 
 

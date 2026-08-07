@@ -380,6 +380,13 @@ def main():
         'location_code':         _location_code_from_gproj(args.g_proj),
         'mp4_frame_count':       actual_total,
         'animation_frame_count': replay_frames[-1]['frame_index'] if replay_frames else 0,
+        'run_config': {
+            'checkpoint': args.weights,
+            'method':     'carfusion',
+            'localizer':  'procrustes',
+            'detector':   {'source': 'live', 'model': args.weights,
+                            'conf': args.conf, 'tracker': args.tracker},
+        },
         'frames':                replay_frames,
     }
     with open(json_path, 'w') as f:
