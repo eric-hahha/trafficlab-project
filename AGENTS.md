@@ -372,6 +372,37 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/traje
 If the replay file does not contain `location_code` metadata, pass either
 `--location-code <code>` or `--sat-image <path>`.
 
+Zoom in on a specific vehicle and overlay its keypoints:
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py plot output/example.json.gz \
+  --ids 0 --zoom-to-fit --zoom-margin 100 --show-heading-arrows --show-keypoints
+```
+
+`--zoom-margin` (default `200`) is the padding added around the selected
+trajectory's bounding box, in satellite-image pixels; the crop window is then
+grown as needed to match the satellite image's own aspect ratio so `imshow`
+isn't stretched. `--show-keypoints` overlays `kp_sat`, colored by keypoint
+name (wheel/light/plate/mirror/corner/low/up) — the same palette as
+`--kp-color-mode part` under "CCTV + SAT composite export".
+
+Render one PNG per frame with the crop window held fixed across every frame
+(for frame-by-frame comparison or turning into a video):
+
+```bash
+source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py frames output/example.json.gz \
+  --ids 0 --zoom-margin 100 --out-dir output/frames_id0
+```
+
+`frames` differs from `plot`: `plot` draws every point of a trajectory onto
+one image; `frames` computes a single fixed crop window from the selected
+id(s)' full trajectory (across all frames) once, then renders one PNG per
+frame that id appears in (position dot, heading arrow, keypoints with
+leader-line labels) — all frames share that same crop window, so the view
+doesn't jump around, which is what you want when feeding the sequence to
+`ffmpeg`. Use `--hide-heading-arrows`/`--hide-keypoints` to turn off either
+layer.
+
 ### Syntax check a script
 
 ```bash
@@ -428,6 +459,9 @@ Most post-inference tools expect the standard replay shape:
 - Plotting skips tracks with fewer than 5 points by default. Use `--min-points` to override this.
 - Plotting skips tracks that are completely outside the satellite image bounds by default. Use `--include-out-of-bounds` to override this.
 - Use `--show-id-labels` to render same-color `tracked_id` labels next to visible trajectories.
+- Use `--zoom-to-fit` with `--zoom-margin` (default `200`, satellite-image pixels) to zoom in on the selected trajectory; the crop window is computed by padding the trajectory's bounding box directly, not via some ratio tied to the source image's own size (raising `margin_px` reliably widens the view — it doesn't asymptote to almost no effect).
+- Use `--show-keypoints` to overlay `kp_sat` keypoints on the trajectory plot, colored by part (wheel/light/plate/mirror/corner/low/up).
+- The `frames` subcommand (`TrajectoryPlotter.compute_zoom_transform()` + `.plot_frame()`) renders one image per frame at a single fixed viewport — the crop window is computed once and shared across every frame, instead of each frame independently zoom-to-fitting (which would make the view jump around). Keypoint labels reuse `plot()`'s `show_id_labels` overlap-avoidance placement logic (`_label_placement`/`_estimate_label_box`/the added `_draw_kp_label`) rather than a separate implementation.
 - Tracks shorter than `--window-length` are left unchanged.
 - The plotter looks for `location/<location_code>/sat_<location_code>.png` unless `--sat-image` is supplied.
 - Do not reintroduce the old standalone `/Users/eric/code/traffic-trajectory-smooth` file layout into this repository. Integrate reusable logic into `trafficlab/trajectory/` and keep sample data outside the repo unless explicitly requested.
