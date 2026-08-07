@@ -39,6 +39,11 @@ def main():
     p.add_argument('--sat-image', default=None, help='Override SAT background path '
                                                        '(default: location/<code>/sat_<code>.png)')
     p.add_argument('--kp-conf', type=float, default=0.2, help='Keypoint confidence threshold for the 2D box (default 0.2)')
+    p.add_argument('--sat-only', action='store_true',
+                   help='Write only the SAT panel (with keypoints), skip the CCTV panel and hstack')
+    p.add_argument('--kp-color-mode', choices=['track', 'part'], default='track',
+                   help='Color sat keypoints by vehicle track (default) or by car part '
+                        '(wheel/light/plate/mirror/corner/low/up)')
     args = p.parse_args()
 
     data = load_replay(args.replay)
@@ -56,58 +61,77 @@ def main():
         raise SystemExit(f'could not load SAT image: {sat_path}')
     sw, sh = sat_bg.width(), sat_bg.height()
 
-    cct_renderer = CCTRenderer()
     sat_renderer = SatRenderer()
 
-    frames_by_index = {fr['frame_index']: fr['objects'] for fr in data['frames']}
+    def render_sat(objects):
+        sat_canvas = QPixmap(sat_bg)
+        overlay = sat_renderer.render(objects, sw, sh,
+                                      show_sat_box=True,
+                                      show_sat_arrow=True,
+                                      show_sat_coords_dot=True,
+                                      sat_use_svg=False,
+                                      show_3d=False,
+                                      show_sat_label=True,
+                                      show_sat_keypoints=True,
+                                      kp_color_mode=args.kp_color_mode)
+        painter = QPainter(sat_canvas)
+        painter.drawPixmap(0, 0, overlay)
+        painter.end()
+        return sat_canvas
 
-    cap = cv2.VideoCapture(video_path)
-    idx = 0
     n_written = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        objects = frames_by_index.get(idx)
-        if objects is not None:
-            for obj in objects:
-                kp = obj.get('kp_cctv')
-                if kp and obj.get('bbox_2d') is None:
-                    box = kp_bbox_xyxy(np.array(kp), conf_thresh=args.kp_conf)
-                    if box is not None:
-                        obj['bbox_2d'] = list(box)
 
-            cctv_pix = cct_renderer.render(frame, objects, show_3d=False)
-
-            sat_canvas = QPixmap(sat_bg)
-            overlay = sat_renderer.render(objects, sw, sh,
-                                          show_sat_box=True,
-                                          show_sat_arrow=True,
-                                          show_sat_coords_dot=True,
-                                          sat_use_svg=False,
-                                          show_3d=False,
-                                          show_sat_label=True)
-            painter = QPainter(sat_canvas)
-            painter.drawPixmap(0, 0, overlay)
-            painter.end()
-
-            target_h = cctv_pix.height()
-            sat_scaled = sat_canvas.scaledToHeight(target_h, Qt.SmoothTransformation)
-
-            combo = QPixmap(cctv_pix.width() + sat_scaled.width(), target_h)
-            combo.fill(Qt.black)
-            cp = QPainter(combo)
-            cp.drawPixmap(0, 0, cctv_pix)
-            cp.drawPixmap(cctv_pix.width(), 0, sat_scaled)
-            cp.end()
-
+    if args.sat_only:
+        # No CCTV panel needed, so no need to open the video either.
+        for fr in sorted(data['frames'], key=lambda fr: fr['frame_index']):
+            idx = fr['frame_index']
+            objects = fr['objects']
+            if not objects:
+                continue
+            sat_canvas = render_sat(objects)
             out_path = os.path.join(args.out_dir, f'frame_{idx:04d}.png')
-            combo.save(out_path)
+            sat_canvas.save(out_path)
             n_written += 1
+    else:
+        cct_renderer = CCTRenderer()
+        frames_by_index = {fr['frame_index']: fr['objects'] for fr in data['frames']}
 
-        idx += 1
+        cap = cv2.VideoCapture(video_path)
+        idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            objects = frames_by_index.get(idx)
+            if objects is not None:
+                for obj in objects:
+                    kp = obj.get('kp_cctv')
+                    if kp and obj.get('bbox_2d') is None:
+                        box = kp_bbox_xyxy(np.array(kp), conf_thresh=args.kp_conf)
+                        if box is not None:
+                            obj['bbox_2d'] = list(box)
 
-    cap.release()
+                cctv_pix = cct_renderer.render(frame, objects, show_3d=False)
+                sat_canvas = render_sat(objects)
+
+                target_h = cctv_pix.height()
+                sat_scaled = sat_canvas.scaledToHeight(target_h, Qt.SmoothTransformation)
+
+                combo = QPixmap(cctv_pix.width() + sat_scaled.width(), target_h)
+                combo.fill(Qt.black)
+                cp = QPainter(combo)
+                cp.drawPixmap(0, 0, cctv_pix)
+                cp.drawPixmap(cctv_pix.width(), 0, sat_scaled)
+                cp.end()
+
+                out_path = os.path.join(args.out_dir, f'frame_{idx:04d}.png')
+                combo.save(out_path)
+                n_written += 1
+
+            idx += 1
+
+        cap.release()
+
     print(f'wrote {n_written} composite frame(s) to {args.out_dir}')
 
 

@@ -26,6 +26,26 @@ _KP_LABEL_OFFSETS = [
 _KP_MARKER_RADIUS = 3.0
 _KP_LABEL_FONT_SIZE = 6.0
 
+# Keypoint-name substring -> car part, checked in this order (first match wins;
+# 'up' must come after the more specific parts since e.g. 'front_up_right' has
+# no other matching substring). Colors chosen for max hue separation.
+_KP_PART_COLORS = [
+    ('wheel',  QColor(34, 197, 94)),    # green
+    ('light',  QColor(249, 115, 22)),   # orange
+    ('plate',  QColor(234, 179, 8)),    # yellow
+    ('mirror', QColor(34, 211, 238)),   # cyan
+    ('corner', QColor(236, 72, 153)),   # pink
+    ('low',    QColor(168, 85, 247)),   # purple
+    ('up',     QColor(59, 130, 246)),   # blue
+]
+
+
+def _kp_part_color(kp_name: str) -> QColor:
+    for substr, color in _KP_PART_COLORS:
+        if substr in kp_name:
+            return color
+    return QColor(200, 200, 200)  # unmatched name, shouldn't happen
+
 
 class SatRenderer:
     """Draws per-frame object overlays onto a single cached QPixmap (satellite view).
@@ -51,6 +71,7 @@ class SatRenderer:
                show_3d=True,
                show_sat_label=False,
                show_sat_keypoints=False,
+               kp_color_mode="track",
                sat_label_size=12,
                text_color_mode="White",
                speed_display_cache=None,
@@ -161,7 +182,7 @@ class SatRenderer:
                 painter.drawText(QPointF(coord[0], coord[1]), label_str)
 
         if show_sat_keypoints:
-            self._draw_keypoints(painter, objects, show_tracking, scene_w, scene_h)
+            self._draw_keypoints(painter, objects, show_tracking, scene_w, scene_h, kp_color_mode)
 
         painter.end()
         return QPixmap.fromImage(self._img)
@@ -171,7 +192,7 @@ class SatRenderer:
     # kp_sat entry, each with a "tracked_id-keypoint_name" label joined to its
     # point by a black leader line, placed to avoid covering any point marker
     # or other label.
-    def _draw_keypoints(self, painter, objects, show_tracking, scene_w, scene_h):
+    def _draw_keypoints(self, painter, objects, show_tracking, scene_w, scene_h, kp_color_mode="track"):
         kp_points = []  # (x, y, tracked_id, kp_idx, color)
         for obj in objects:
             kp_sat = obj.get("kp_sat")
@@ -180,10 +201,14 @@ class SatRenderer:
             tid = obj.get("tracked_id")
             cls = obj.get("class", "?")
             seed = f"{cls}_{tid}" if (show_tracking and tid is not None) else cls
-            col = get_color_from_string(seed)
+            track_col = get_color_from_string(seed)
             for kp_idx, kp in enumerate(kp_sat):
                 if kp is None:
                     continue
+                if kp_color_mode == "part":
+                    col = _kp_part_color(_KEYPOINT_NAMES[kp_idx])
+                else:
+                    col = track_col
                 kp_points.append((float(kp[0]), float(kp[1]), tid, kp_idx, col))
 
         if not kp_points:
