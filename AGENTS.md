@@ -210,6 +210,44 @@ Options:
 Output: PNG saved next to the input JSON by default
 (`<stem>.keypoints_frame<N>.png`).
 
+### CCTV + SAT composite export
+
+Batch-render an entire h-aware (or other replay-shaped) JSON to PNGs, reusing
+the GUI's own headless renderers (`CCTRenderer`, `SatRenderer`) — no new
+drawing logic. Default mode writes one PNG per frame with the CCTV frame on
+the left and the SAT overlay (boxes/arrows/labels/keypoints) on the right,
+scaled to the same height and placed side by side.
+
+```bash
+QT_QPA_PLATFORM=offscreen python scripts/export_cctv_sat_composite.py \
+  --replay output/haware/test21/test21-4.json.gz \
+  --out-dir output/haware/test21/composite
+```
+
+Options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--replay` | *(required)* | Path to replay `.json`/`.json.gz` |
+| `--out-dir` | *(required)* | Directory to write per-frame PNGs |
+| `--cctv-video` | `mp4_path` in replay | Override video path |
+| `--sat-image` | `location/<code>/sat_<code>.png` | Override SAT background path |
+| `--kp-conf` | `0.2` | Keypoint confidence threshold used only to derive a 2D box when `bbox_2d` is missing |
+| `--sat-only` | off | Skip the CCTV panel and hstack entirely — writes just the SAT overlay, and skips opening the video file since it's not needed |
+| `--kp-color-mode` | `track` | `track` colors each vehicle's keypoints by its track color (default, matches GUI); `part` colors by car part instead (wheel/light/plate/mirror/corner/low/up), same color across vehicles |
+
+Output: `frame_<NNNN>.png` per frame in `--out-dir`. To turn the sequence into
+a video:
+
+```bash
+ffmpeg -framerate 25 -i output/haware/test21/composite/frame_%04d.png \
+  -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p \
+  output/haware/test21/composite.mp4
+```
+
+(the `pad` filter is only needed when the composite width/height comes out
+odd, which `libx264` rejects.)
+
 ### CarFusion vehicle pose + tracking
 
 Run CarFusion's YOLOv8-Pose model (one-stage bbox + 14 keypoints) on every
