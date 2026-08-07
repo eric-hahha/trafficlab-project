@@ -23,6 +23,8 @@ dependencies:
       - torchvision==0.17.2
       - torchaudio==2.2.2
       - ultralytics
+      - supervision>=0.29.0
+      - trackers>=2.0.0
       - PyQt5
       - pyqtdarktheme
       - pyqtgraph

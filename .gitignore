@@ -39,3 +39,7 @@ trafficlab-storage
 # Large local assets that should not be pushed
 models/*.pt
 location/*/footage/*.mp4
+
+# Ultralytics auto-downloaded checkpoints (e.g. car-segmenter's yolo11n-seg.pt)
+# land in the CWD when given a bare model name instead of a path
+/*.pt
