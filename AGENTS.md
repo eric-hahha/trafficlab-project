@@ -125,7 +125,7 @@ source /Users/eric/opt/anaconda3/bin/activate trafficlab && python postprocess.p
 Run OpenPifPaf Apollo-24 detection on every frame and localize each vehicle via
 height-aware keypoint template matching. Output is a standard TrafficLab replay
 JSON loadable in the GUI (satellite position, heading, footprint, and CCTV
-keypoint overlay). `--method` is required and selects one of two mutually
+keypoint overlay). `--method` is required and selects one of three mutually
 exclusive per-frame strategies — only the selected strategy's own flags take
 effect.
 
@@ -145,6 +145,7 @@ Output: `output/haware/<location_code>/<video_stem>.json.gz`
 |--------|---------------|-----------------|
 | `geometric` | Bridge PifPaf detections to YOLO track IDs via bbox IoU. A PifPaf detection with only one confident keypoint has a zero-area bbox and never clears the IoU threshold on its own — a second pass recovers these: if the lone keypoint falls inside exactly one YOLO box, it's merged into the detection already IoU-matched to that track this frame (the fragment is then dropped so it doesn't also appear as its own object), or, if no such detection exists this frame, the fragment is tagged with the track id directly. | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
 | `crop` | Crop each Pass-1 bbox and re-run PifPaf on the crop to recover more confident keypoints. | `--crop-redetect` / `--crop-padding` |
+| `segmentation` | Merge PifPaf fragments that belong to the same vehicle using car-segmenter (YOLO11-seg) instance masks instead of a bbox-IoU heuristic — fixes the general PifPaf instance-splitting case (two multi-keypoint fragments from one vehicle) that `geometric`'s single-keypoint recovery can't. Each PifPaf annotation is assigned to whichever mask contains the majority of its confident keypoints; annotations sharing a mask are merged (higher-confidence keypoint wins per slot); fragments matching no mask are kept unmerged. `tracked_id`/`bbox_2d` come from car-segmenter's own instance (ByteTrack tracker id, mask-derived box) — this method does not use `--yolo`/Method B at all. See `docs/keypoints-openpifpaf-segmentation-matching.md`. | `--seg-model` / `--seg-conf` / `--seg-device` |
 
 Shared options:
 
@@ -177,9 +178,42 @@ Shared options:
 | `--crop-redetect` | off | Crop each Pass-1 bbox with 50% padding and re-run PifPaf; without this flag `--method crop` is equivalent to plain Pass-1 PifPaf |
 | `--crop-padding` | `0.5` | Fractional padding around the bbox for the crop |
 
+`--method segmentation` options:
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--seg-model` | `yolo11n-seg.pt` | Ultralytics `*-seg` checkpoint for car-segmenter; auto-downloaded on first use if not present locally |
+| `--seg-conf` | `0.3` | car-segmenter detection confidence threshold |
+| `--seg-device` | *(auto)* | `cuda` / `mps` / `cpu`, or leave unset to let ultralytics pick |
+| `--seg-masks-json` | *(none)* | Path to a `record_car_masks.py` output file supplying per-frame car instances (tracker_id/bbox/mask polygon), used instead of running car-segmenter live. When set, `--seg-model`/`--seg-conf`/`--seg-device` are ignored and car-segmenter is never loaded. |
+
 Per-object fields added beyond the standard 14: `kp_cctv` (raw `[x, y, conf] × 24`
 for GUI overlay), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
 `failed_insufficient_kp`).
+
+#### Recording car-segmenter masks once for reuse
+
+`--method segmentation` normally runs car-segmenter live, once per invocation.
+If the same video needs both `--localizer procrustes` and `--localizer
+reprojection` passes, that runs YOLO11-seg twice for identical output. Record
+it once instead and point both passes at the same file:
+
+```bash
+python scripts/record_car_masks.py --video location/test21/footage/test21-4.mp4
+```
+
+Output: `output/car_masks/<location_code>/seg-mask_<video_stem>.json.gz` (pure image-space
+recording — no G-projection, no PifPaf). Then:
+
+```bash
+python scripts/run_keypoints_openpifpaf.py --video location/test21/footage/test21-4.mp4 \
+  --g-proj location/test21/G_projection_test21.json --method segmentation \
+  --seg-masks-json output/car_masks/test21/seg-mask_test21-4.json.gz --localizer procrustes
+
+python scripts/run_keypoints_openpifpaf.py --video location/test21/footage/test21-4.mp4 \
+  --g-proj location/test21/G_projection_test21.json --method segmentation \
+  --seg-masks-json output/car_masks/test21/seg-mask_test21-4.json.gz --localizer reprojection
+```
 
 ### Reprojection keypoint visualization
 
