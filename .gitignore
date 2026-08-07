@@ -32,7 +32,6 @@ Thumbs.db
 
 # Generated inference outputs
 output/*
-!output/README.md
 
 trafficlab-storage
 
