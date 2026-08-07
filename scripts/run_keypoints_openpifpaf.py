@@ -289,9 +289,9 @@ def main():
     parser.add_argument('--yolo-boxes-class', default='car',
                         help='class value in --yolo-boxes-json to treat as a car (default "car")')
     # segmentation matching: car-segmenter instance masks (only when --method segmentation)
-    parser.add_argument('--seg-model', default='yolo11n-seg.pt',
-                        help='Ultralytics *-seg checkpoint for car-segmenter (default yolo11n-seg.pt); '
-                             'auto-downloaded on first use if not present locally')
+    parser.add_argument('--seg-model', default='models/yolo11n-seg.pt',
+                        help='Ultralytics *-seg checkpoint for car-segmenter (default models/yolo11n-seg.pt); '
+                             'auto-downloaded into that path on first use if not present locally')
     parser.add_argument('--seg-conf', type=float, default=0.3,
                         help='car-segmenter detection confidence threshold (default 0.3)')
     parser.add_argument('--seg-device', default=None,

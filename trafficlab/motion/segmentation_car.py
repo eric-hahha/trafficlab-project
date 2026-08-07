@@ -22,7 +22,7 @@ from trafficlab.vendor.car_segmenter import CarSegmenter, CarSegmenterConfig
 class CarMaskSource:
     """Wraps CarSegmenter for single-frame instance-mask lookup."""
 
-    def __init__(self, model_path: str = 'yolo11n-seg.pt', confidence: float = 0.3,
+    def __init__(self, model_path: str = 'models/yolo11n-seg.pt', confidence: float = 0.3,
                  device: str | None = None):
         self._segmenter = CarSegmenter(CarSegmenterConfig(
             model_path=model_path, classes=('car',), confidence=confidence,

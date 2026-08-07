@@ -182,7 +182,7 @@ Shared options:
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `--seg-model` | `yolo11n-seg.pt` | Ultralytics `*-seg` checkpoint for car-segmenter; auto-downloaded on first use if not present locally |
+| `--seg-model` | `models/yolo11n-seg.pt` | Ultralytics `*-seg` checkpoint for car-segmenter; auto-downloaded into that path on first use if not present locally |
 | `--seg-conf` | `0.3` | car-segmenter detection confidence threshold |
 | `--seg-device` | *(auto)* | `cuda` / `mps` / `cpu`, or leave unset to let ultralytics pick |
 | `--seg-masks-json` | *(none)* | Path to a `record_car_masks.py` output file supplying per-frame car instances (tracker_id/bbox/mask polygon), used instead of running car-segmenter live. When set, `--seg-model`/`--seg-conf`/`--seg-device` are ignored and car-segmenter is never loaded. |
