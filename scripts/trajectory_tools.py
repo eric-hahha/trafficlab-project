@@ -47,6 +47,14 @@ def add_common_plot_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--zoom-to-fit", action="store_true", help="Zoom plot to selected tracks.")
     parser.add_argument(
+        "--zoom-margin",
+        type=int,
+        default=200,
+        help="Padding (satellite-image pixels) around the selected trajectory when "
+        "--zoom-to-fit is set. Too small and the crop is just a blur of upsampled "
+        "satellite pixels with no road/landmark context. Defaults to 200.",
+    )
+    parser.add_argument(
         "--include-out-of-bounds",
         action="store_true",
         help="Include tracks that are completely outside the satellite image bounds.",
@@ -55,6 +63,11 @@ def add_common_plot_args(parser: argparse.ArgumentParser) -> None:
         "--show-id-labels",
         action="store_true",
         help="Draw each visible track's tracked_id next to the trajectory.",
+    )
+    parser.add_argument(
+        "--show-keypoints",
+        action="store_true",
+        help="Draw each visible track's kp_sat keypoint projections, colored by car part.",
     )
     parser.add_argument(
         "--show-heading-arrows",
@@ -116,9 +129,11 @@ def run_plot(args: argparse.Namespace) -> None:
         zoom_to_fit=args.zoom_to_fit,
         show_heading_arrows=args.show_heading_arrows,
         show_id_labels=args.show_id_labels,
+        show_keypoints=args.show_keypoints,
         skip_out_of_bounds=not args.include_out_of_bounds,
         title=args.title,
         min_points=args.min_points,
+        zoom_margin_px=args.zoom_margin,
     )
     print(f"Trajectory plot: {output_path}")
 
@@ -146,9 +161,11 @@ def run_smooth_and_plot(args: argparse.Namespace) -> None:
         zoom_to_fit=args.zoom_to_fit,
         show_heading_arrows=args.show_heading_arrows,
         show_id_labels=args.show_id_labels,
+        show_keypoints=args.show_keypoints,
         skip_out_of_bounds=not args.include_out_of_bounds,
         title=args.title,
         min_points=args.min_points,
+        zoom_margin_px=args.zoom_margin,
     )
     print(f"Smoothed output: {smoothed_path}")
     print(
@@ -160,6 +177,45 @@ def run_smooth_and_plot(args: argparse.Namespace) -> None:
         f"updated_points={stats.updated_points}"
     )
     print(f"Trajectory plot: {plot_path}")
+
+
+def run_frames(args: argparse.Namespace) -> None:
+    from trafficlab.trajectory import TrajectoryPlotter
+
+    plotter = TrajectoryPlotter.from_file(
+        args.input_path,
+        location_code=args.location_code,
+        satellite_image_path=args.sat_image,
+    )
+    ids = _parse_ids(args.ids)
+    # Fixed once from the full trajectory (every frame this id appears in),
+    # not per-frame, so the crop stays put across the whole sequence instead
+    # of jumping to fit whatever's in just that one frame.
+    transform = plotter.compute_zoom_transform(selected_ids=ids, margin_px=args.zoom_margin)
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    id_set = set(ids) if ids is not None else None
+    n_written = 0
+    for frame in plotter.frames:
+        objects = frame.get("objects", [])
+        if id_set is not None:
+            objects = [o for o in objects if o.get("tracked_id") in id_set]
+        if not objects:
+            continue
+        frame_index = frame["frame_index"]
+        plotter.plot_frame(
+            out_dir / f"frame_{frame_index:04d}.png",
+            frame_index,
+            transform=transform,
+            selected_ids=ids,
+            show_heading_arrows=not args.hide_heading_arrows,
+            show_keypoints=not args.hide_keypoints,
+        )
+        n_written += 1
+
+    print(f"Wrote {n_written} frame(s) to {out_dir}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -208,6 +264,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_plot_args(both)
     both.set_defaults(func=run_smooth_and_plot)
+
+    frames = subparsers.add_parser(
+        "frames",
+        help="Plot one PNG per frame within a single fixed zoom window (e.g. to turn into a video with ffmpeg).",
+    )
+    frames.add_argument("input_path", help="Input .json or .json.gz replay file.")
+    frames.add_argument("--out-dir", required=True, help="Directory to write per-frame PNGs.")
+    frames.add_argument(
+        "--ids",
+        help="Comma-separated tracked_id values to include. Determines both which frames get "
+        "written (only ones where a selected id appears) and the fixed zoom window (fit to "
+        "these ids' combined trajectory). Omit to include every id and zoom to the whole image.",
+    )
+    frames.add_argument("--location-code", help="Override inferred location code.")
+    frames.add_argument("--sat-image", help="Explicit satellite image path.")
+    frames.add_argument(
+        "--zoom-margin",
+        type=int,
+        default=200,
+        help="Padding (satellite-image pixels) around the selected trajectory. Defaults to 200.",
+    )
+    frames.add_argument("--hide-heading-arrows", action="store_true", help="Don't draw heading arrows.")
+    frames.add_argument("--hide-keypoints", action="store_true", help="Don't draw kp_sat keypoint projections.")
+    frames.set_defaults(func=run_frames)
 
     return parser
 

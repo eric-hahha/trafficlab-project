@@ -25,12 +25,37 @@ import numpy as np
 from matplotlib import colors as mcolors
 from PIL import Image
 
+from trafficlab.motion.keypoints_openpifpaf import KP_NAMES
 from trafficlab.trajectory.io import (
     frames_from_data,
     infer_location_code,
     load_json,
     resolve_satellite_image_path,
 )
+
+# Keypoint-name substring -> car part, checked in this order (first match
+# wins). Mirrors trafficlab/visualization/sat_renderer.py's kp_color_mode=
+# "part" palette (same hues, converted to 0-1 floats for matplotlib) so a
+# keypoint's color means the same thing whether it's rendered by the Qt GUI
+# renderer or this matplotlib plotter. Not shared code because the two
+# renderers intentionally don't depend on each other's backend (Qt vs
+# matplotlib).
+_KP_PART_COLORS = [
+    ('wheel',  (34 / 255, 197 / 255, 94 / 255)),
+    ('light',  (249 / 255, 115 / 255, 22 / 255)),
+    ('plate',  (234 / 255, 179 / 255, 8 / 255)),
+    ('mirror', (34 / 255, 211 / 255, 238 / 255)),
+    ('corner', (236 / 255, 72 / 255, 153 / 255)),
+    ('low',    (168 / 255, 85 / 255, 247 / 255)),
+    ('up',     (59 / 255, 130 / 255, 246 / 255)),
+]
+
+
+def _kp_part_color(kp_name: str) -> tuple[float, float, float]:
+    for substr, color in _KP_PART_COLORS:
+        if substr in kp_name:
+            return color
+    return (0.78, 0.78, 0.78)  # unmatched name, shouldn't happen
 
 
 class TrajectoryPlotter:
@@ -138,6 +163,25 @@ class TrajectoryPlotter:
 
         return headings
 
+    def extract_keypoints(self) -> dict[int, list[tuple[float, float, int]]]:
+        """Per-track (x, y, kp_idx) for every valid kp_sat entry across all frames."""
+        keypoints: dict[int, list[tuple[float, float, int]]] = {}
+
+        for frame in self.frames:
+            for obj in frame.get("objects", []):
+                tracked_id = obj.get("tracked_id")
+                kp_sat = obj.get("kp_sat")
+                if tracked_id is None or not kp_sat:
+                    continue
+                for kp_idx, kp in enumerate(kp_sat):
+                    if not self._valid_point(kp):
+                        continue
+                    keypoints.setdefault(int(tracked_id), []).append(
+                        (float(kp[0]), float(kp[1]), kp_idx)
+                    )
+
+        return keypoints
+
     def plot_scatter(
         self,
         output_path: str | Path,
@@ -190,6 +234,194 @@ class TrajectoryPlotter:
         plt.close(fig)
         return output_path
 
+    def compute_zoom_transform(
+        self,
+        selected_ids: Iterable[int] | None = None,
+        *,
+        margin_px: int = 200,
+        min_points: int = 1,
+        skip_out_of_bounds: bool = False,
+    ) -> dict[str, float]:
+        """Compute a single fixed zoom/crop window from a track's full trajectory
+        (across every frame it appears in), for use as a shared viewport when
+        rendering one plot per frame with plot_frame() — every frame gets the
+        same view_min/max_x/y instead of independently fitting to just that
+        frame's points, so the zoom and framing don't jump around frame to frame.
+        """
+        trajectories = self.extract_trajectories(min_points=min_points)
+        if selected_ids is not None:
+            selected_id_set = {int(track_id) for track_id in selected_ids}
+            trajectories = {
+                track_id: points
+                for track_id, points in trajectories.items()
+                if track_id in selected_id_set
+            }
+        if skip_out_of_bounds:
+            trajectories = self._filter_visible_trajectories(trajectories)
+        if not trajectories:
+            raise ValueError("No trajectories matched the requested selection.")
+        return self._zoom_transform(trajectories, margin_px=margin_px)
+
+    def plot_frame(
+        self,
+        output_path: str | Path,
+        frame_index: int,
+        *,
+        transform: dict[str, float],
+        selected_ids: Iterable[int] | None = None,
+        show_heading_arrows: bool = True,
+        show_keypoints: bool = True,
+        title: str | None = None,
+        dpi: int = 200,
+    ) -> Path:
+        """Plot a single frame's object positions/headings/keypoints within a
+        fixed, externally-supplied zoom window (see compute_zoom_transform).
+        """
+        frame = next((f for f in self.frames if f.get("frame_index") == frame_index), None)
+        if frame is None:
+            raise ValueError(f"frame_index {frame_index} not found in replay JSON.")
+
+        objects = frame.get("objects", [])
+        if selected_ids is not None:
+            selected_id_set = {int(track_id) for track_id in selected_ids}
+            objects = [o for o in objects if o.get("tracked_id") in selected_id_set]
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        zoom_scale = transform["scale"]
+        size_mult = max(1.0, zoom_scale) ** 0.5
+        marker_size = min(16.0, 3.0 * size_mult)
+        marker_edge_width = min(2.0, 0.6 * size_mult)
+        arrow_lw = min(3.0, 1.0 * size_mult)
+        arrow_mutation_scale = min(24.0, 8.0 * size_mult)
+        keypoint_marker_size = min(80.0, 10.0 * size_mult)
+        keypoint_marker_radius_pt = min(9.0, 3.0 * size_mult)
+        kp_font_size = min(10.0, 6.0 * (size_mult ** 0.5))
+        arrow_length = self._heading_arrow_length(transform)
+
+        fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+        ax.imshow(
+            self.satellite_image,
+            extent=[0, self.satellite_image.width, self.satellite_image.height, 0],
+        )
+
+        track_ids = sorted(
+            {o.get("tracked_id") for o in objects if o.get("tracked_id") is not None}
+        )
+        color_map = self._color_map_for_ids(track_ids)
+
+        id_label_requests = []   # (point, track_id, color)
+        kp_label_requests = []   # (point, label)
+
+        for obj in objects:
+            tracked_id = obj.get("tracked_id")
+            sat_coords = obj.get("sat_coords") or obj.get("sat_coord")
+            color = color_map.get(tracked_id, "red")
+
+            if show_keypoints:
+                kp_sat = obj.get("kp_sat") or []
+                kp_points = [
+                    (float(kp[0]), float(kp[1]), kp_idx)
+                    for kp_idx, kp in enumerate(kp_sat)
+                    if self._valid_point(kp)
+                ]
+                if kp_points:
+                    kp_x = [p[0] for p in kp_points]
+                    kp_y = [p[1] for p in kp_points]
+                    kp_colors = [_kp_part_color(KP_NAMES[p[2]]) for p in kp_points]
+                    ax.scatter(
+                        kp_x, kp_y,
+                        s=keypoint_marker_size,
+                        c=kp_colors,
+                        edgecolors="white",
+                        linewidths=0.4,
+                        alpha=0.85,
+                        zorder=2,
+                    )
+                    id_str = str(tracked_id) if tracked_id is not None else "?"
+                    for x, y, kp_idx in kp_points:
+                        kp_label_requests.append(((x, y), f"{id_str}-{KP_NAMES[kp_idx]}"))
+
+            if not self._valid_point(sat_coords):
+                continue
+
+            ax.plot(
+                sat_coords[0], sat_coords[1],
+                marker="o",
+                markersize=marker_size,
+                color=color,
+                markeredgecolor="white",
+                markeredgewidth=marker_edge_width,
+                linestyle="None",
+                zorder=3,
+            )
+
+            if tracked_id is not None:
+                id_label_requests.append(((sat_coords[0], sat_coords[1]), tracked_id, color))
+
+            if show_heading_arrows:
+                heading = obj.get("heading", obj.get("heading_deg", obj.get("yaw")))
+                heading_rad = self._heading_to_radians(heading) if isinstance(heading, (int, float)) else None
+                if heading_rad is not None:
+                    dx = arrow_length * np.cos(heading_rad)
+                    dy = arrow_length * np.sin(heading_rad)
+                    ax.annotate(
+                        "",
+                        xy=(sat_coords[0] + dx, sat_coords[1] + dy),
+                        xytext=(sat_coords[0], sat_coords[1]),
+                        arrowprops=dict(
+                            arrowstyle="->",
+                            color=color,
+                            lw=arrow_lw,
+                            mutation_scale=arrow_mutation_scale,
+                        ),
+                        zorder=4,
+                    )
+
+        ax.set_xlim(transform["view_min_x"], transform["view_max_x"])
+        ax.set_ylim(transform["view_max_y"], transform["view_min_y"])
+        ax.set_aspect("equal")
+        ax.set_title(title or f"TrafficLab Frame {frame_index} - {self.location_code}", fontsize=16)
+        ax.set_xlabel("X Coordinate (pixels)", fontsize=12)
+        ax.set_ylabel("Y Coordinate (pixels)", fontsize=12)
+
+        # Labels are placed after xlim/ylim are set (ax.transData needs current
+        # data limits to be accurate) and after every marker is drawn, so their
+        # occupied-box search can avoid covering markers as well as each other.
+        # Vehicle ID labels are reserved/drawn first — one per vehicle, higher
+        # priority to keep clear — before the (much more numerous) keypoint
+        # labels compete for space around them.
+        occupied_boxes = [self._marker_box(ax, point, marker_size / 2.0 + 2.0)
+                           for point, _tid, _color in id_label_requests]
+        occupied_boxes += [self._marker_box(ax, point, keypoint_marker_radius_pt)
+                            for point, _label in kp_label_requests]
+
+        for point, tracked_id, color in id_label_requests:
+            self._draw_id_label(ax, tracked_id, point, color, occupied_boxes)
+
+        for point, label in kp_label_requests:
+            self._draw_kp_label(ax, point, label, occupied_boxes, font_size=kp_font_size)
+
+        legend_lines = [f"Frame: {frame_index}", f"Zoom Scale: {zoom_scale:.2f}x", "", "Legend:", "  dot: position"]
+        if show_heading_arrows:
+            legend_lines.append("  arrow: heading")
+        if show_keypoints:
+            legend_lines.append("  small dot: keypoint, labeled id-part (color = car part)")
+        ax.text(
+            0.02, 0.98,
+            "\n".join(legend_lines),
+            transform=ax.transAxes,
+            fontsize=11,
+            verticalalignment="top",
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
+        )
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return output_path
+
     def plot(
         self,
         output_path: str | Path,
@@ -198,10 +430,12 @@ class TrajectoryPlotter:
         zoom_to_fit: bool = False,
         show_heading_arrows: bool = False,
         show_id_labels: bool = False,
+        show_keypoints: bool = False,
         skip_out_of_bounds: bool = True,
         title: str | None = None,
         dpi: int = 300,
         min_points: int = 5,
+        zoom_margin_px: int = 200,
     ) -> Path:
         trajectories = self.extract_trajectories(min_points=min_points)
         if selected_ids is not None:
@@ -223,8 +457,26 @@ class TrajectoryPlotter:
 
         object_classes = self.extract_classes()
         headings = self.extract_headings() if show_heading_arrows else {}
-        transform = self._zoom_transform(trajectories) if zoom_to_fit else None
+        keypoints_by_id = self.extract_keypoints() if show_keypoints else {}
+        transform = self._zoom_transform(trajectories, margin_px=zoom_margin_px) if zoom_to_fit else None
         arrow_length = self._heading_arrow_length(transform) if show_heading_arrows else 0.0
+
+        # Marker/line sizes below are fixed in points, so they don't grow on
+        # their own as the view zooms in (unlike the satellite image, which
+        # visibly pixelates) — without this they end up looking tiny and thin
+        # against an increasingly blown-up background. Scale them up with the
+        # zoom factor (dampened by sqrt so they don't balloon at extreme
+        # zoom); no effect on the unzoomed default (scale == 1.0).
+        zoom_scale = transform["scale"] if transform else 1.0
+        size_mult = max(1.0, zoom_scale) ** 0.5
+        marker_size = min(14.0, 2.0 * size_mult)
+        marker_edge_width = min(2.0, 0.4 * size_mult)
+        arrow_lw = min(3.0, 0.8 * size_mult)
+        arrow_mutation_scale = min(20.0, 6.0 * size_mult)
+        # scatter's `s` is a marker *area* (points^2), unlike ax.plot's
+        # markersize (points) above — base value chosen for a small dot at
+        # zoom_scale == 1, not derived from marker_size.
+        keypoint_marker_size = min(60.0, 8.0 * size_mult)
 
         fig, ax = plt.subplots(1, 1, figsize=(16, 12))
         ax.imshow(
@@ -245,16 +497,32 @@ class TrajectoryPlotter:
                 y_coords,
                 linestyle="None",
                 marker="o",
-                markersize=2,
+                markersize=marker_size,
                 color=color,
                 markeredgecolor="white",
-                markeredgewidth=0.4,
+                markeredgewidth=marker_edge_width,
                 alpha=0.92,
             )[0]
 
             if len(legend_items) < 15:
                 obj_class = object_classes.get(track_id, "unknown")
                 legend_items.append((line, f"ID {track_id} ({obj_class})"))
+
+            if show_keypoints:
+                kp_points = keypoints_by_id.get(track_id, [])
+                if kp_points:
+                    kp_x = [p[0] for p in kp_points]
+                    kp_y = [p[1] for p in kp_points]
+                    kp_colors = [_kp_part_color(KP_NAMES[p[2]]) for p in kp_points]
+                    ax.scatter(
+                        kp_x, kp_y,
+                        s=keypoint_marker_size,
+                        c=kp_colors,
+                        edgecolors="white",
+                        linewidths=0.3,
+                        alpha=0.8,
+                        zorder=1.5,
+                    )
 
             if show_heading_arrows:
                 for point_x, point_y, heading in headings.get(track_id, []):
@@ -270,8 +538,8 @@ class TrajectoryPlotter:
                         arrowprops=dict(
                             arrowstyle="->",
                             color=color,
-                            lw=0.8,
-                            mutation_scale=6,
+                            lw=arrow_lw,
+                            mutation_scale=arrow_mutation_scale,
                         ),
                         zorder=4,
                     )
@@ -306,7 +574,7 @@ class TrajectoryPlotter:
         ax.text(
             0.02,
             0.98,
-            self._stats_text(trajectories, object_classes, transform, show_heading_arrows),
+            self._stats_text(trajectories, object_classes, transform, show_heading_arrows, show_keypoints),
             transform=ax.transAxes,
             fontsize=11,
             verticalalignment="top",
@@ -392,22 +660,62 @@ class TrajectoryPlotter:
         )
 
     @classmethod
+    def _draw_kp_label(
+        cls,
+        ax,
+        point: tuple[float, float],
+        label: str,
+        occupied_boxes: list[tuple[float, float, float, float]],
+        *,
+        font_size: float = 6.0,
+    ) -> None:
+        """Small leader-line label for a keypoint, distinct from _draw_id_label's
+        bold colored-box style (there can be up to 24 of these per vehicle, so
+        each one needs to stay visually light). Shares the same overlap-avoiding
+        placement search as _draw_id_label via _label_placement/occupied_boxes."""
+        offset, alignment, box = cls._label_placement(ax, point, label, occupied_boxes, font_size=font_size)
+        occupied_boxes.append(box)
+        ax.annotate(
+            label,
+            xy=point,
+            xytext=offset,
+            textcoords="offset points",
+            color="black",
+            fontsize=font_size,
+            horizontalalignment=alignment[0],
+            verticalalignment=alignment[1],
+            bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "edgecolor": "none", "alpha": 0.78},
+            arrowprops=dict(arrowstyle="-", color="black", lw=0.5),
+            zorder=5,
+        )
+
+    @staticmethod
+    def _marker_box(ax, point: tuple[float, float], radius_pt: float) -> tuple[float, float, float, float]:
+        """Occupied-box footprint for a plotted marker (not a label), so label
+        placement can avoid covering markers as well as other labels."""
+        px, py = ax.transData.transform(point)
+        r = radius_pt * ax.figure.dpi / 72.0
+        return (px - r, py - r, px + r, py + r)
+
+    @classmethod
     def _label_placement(
         cls,
         ax,
         point: tuple[float, float],
         label: str,
         occupied_boxes: list[tuple[float, float, float, float]],
+        *,
+        font_size: float | None = None,
     ) -> tuple[tuple[int, int], tuple[str, str], tuple[float, float, float, float]]:
         for offset in cls._label_offsets():
             alignment = cls._label_alignment(offset)
-            box = cls._estimate_label_box(ax, point, offset, alignment, label)
+            box = cls._estimate_label_box(ax, point, offset, alignment, label, font_size=font_size)
             if not any(cls._boxes_overlap(box, occupied) for occupied in occupied_boxes):
                 return offset, alignment, box
 
         offset = (72, 72)
         alignment = ("left", "bottom")
-        box = cls._estimate_label_box(ax, point, offset, alignment, label)
+        box = cls._estimate_label_box(ax, point, offset, alignment, label, font_size=font_size)
         return offset, alignment, box
 
     @staticmethod
@@ -441,14 +749,17 @@ class TrajectoryPlotter:
         offset: tuple[int, int],
         alignment: tuple[str, str],
         label: str,
+        *,
+        font_size: float | None = None,
     ) -> tuple[float, float, float, float]:
+        fs = font_size if font_size is not None else cls._LABEL_FONT_SIZE
         point_x, point_y = ax.transData.transform(point)
         offset_x = offset[0] * ax.figure.dpi / 72.0
         offset_y = offset[1] * ax.figure.dpi / 72.0
         anchor_x = point_x + offset_x
         anchor_y = point_y + offset_y
-        width = max(24.0, len(label) * cls._LABEL_FONT_SIZE * 0.72 + 12.0)
-        height = cls._LABEL_FONT_SIZE * 1.65
+        width = max(24.0, len(label) * fs * 0.72 + 12.0)
+        height = fs * 1.65
 
         if alignment[0] == "left":
             min_x, max_x = anchor_x, anchor_x + width
@@ -483,7 +794,7 @@ class TrajectoryPlotter:
     def _zoom_transform(
         self,
         trajectories: dict[int, list[tuple[float, float]]],
-        margin_px: int = 10,
+        margin_px: int = 200,
     ) -> dict[str, float]:
         points = [point for trajectory in trajectories.values() for point in trajectory]
         x_coords = [point[0] for point in points]
@@ -495,20 +806,29 @@ class TrajectoryPlotter:
 
         image_width = self.satellite_image.width
         image_height = self.satellite_image.height
-        drawable_width = max(image_width - 2 * margin_px, 1)
-        drawable_height = max(image_height - 2 * margin_px, 1)
 
-        if span_x == 0 and span_y == 0:
-            scale = 1.0
-        elif span_x == 0:
-            scale = drawable_height / span_y
-        elif span_y == 0:
-            scale = drawable_width / span_x
+        # Crop window = trajectory bounding box padded by margin_px on every
+        # side, in the same satellite-pixel units as span_x/span_y — so
+        # margin_px means exactly "this many satellite pixels of padding"
+        # regardless of trajectory size or image resolution. (Previously this
+        # derived a "scale" from image_width/image_height minus margin, which
+        # doesn't correspond to any real padding amount and made margin_px
+        # nearly meaningless.)
+        raw_view_width = span_x + 2 * margin_px
+        raw_view_height = span_y + 2 * margin_px
+
+        # Grow (never shrink) to match the image's aspect ratio, so imshow
+        # isn't stretched and the requested margin is never reduced below
+        # margin_px on the constraining axis.
+        image_aspect = image_width / image_height
+        if raw_view_width / raw_view_height > image_aspect:
+            view_width = raw_view_width
+            view_height = raw_view_width / image_aspect
         else:
-            scale = min(drawable_width / span_x, drawable_height / span_y)
+            view_height = raw_view_height
+            view_width = raw_view_height * image_aspect
 
-        view_width = image_width / scale
-        view_height = image_height / scale
+        scale = image_width / view_width
         center_x = (min_x + max_x) / 2.0
         center_y = (min_y + max_y) / 2.0
 
@@ -551,6 +871,7 @@ class TrajectoryPlotter:
         object_classes: dict[int, str],
         transform: dict[str, float] | None,
         show_heading_arrows: bool,
+        show_keypoints: bool = False,
     ) -> str:
         class_counts: dict[str, int] = {}
         for track_id in trajectories:
@@ -568,6 +889,10 @@ class TrajectoryPlotter:
                     f"View Window: {transform['view_width']:.1f} x {transform['view_height']:.1f}",
                 ]
             )
-        if show_heading_arrows:
-            lines.extend(["", "Legend:", "  arrow: heading"])
+        if show_heading_arrows or show_keypoints:
+            lines.extend(["", "Legend:"])
+            if show_heading_arrows:
+                lines.append("  arrow: heading")
+            if show_keypoints:
+                lines.append("  dot: keypoint (color = car part)")
         return "\n".join(lines)
