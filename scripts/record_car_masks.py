@@ -11,7 +11,7 @@ record once here and point both runs at the same file instead of paying for
 YOLO11-seg inference twice.
 
 Usage:
-    source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
+    source /opt/anaconda3/bin/activate trafficlab && \\
     python scripts/record_car_masks.py \\
         --video location/test21/footage/test21-4.mp4
 """
@@ -44,8 +44,8 @@ def main():
     parser.add_argument('--out', default=None,
                         help='Output .json.gz path '
                              '(default: output/car_masks/<location>/seg-mask_<video_stem>.json.gz)')
-    parser.add_argument('--seg-model', default='models/yolo11n-seg.pt',
-                        help='Ultralytics *-seg checkpoint (default models/yolo11n-seg.pt); '
+    parser.add_argument('--seg-model', default='models/yolo11m-seg.pt',
+                        help='Ultralytics *-seg checkpoint (default models/yolo11m-seg.pt); '
                              'auto-downloaded into that path on first use if not present locally')
     parser.add_argument('--seg-conf', type=float, default=0.3,
                         help='car-segmenter detection confidence threshold (default 0.3)')
