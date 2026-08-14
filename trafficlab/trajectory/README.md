@@ -16,7 +16,7 @@ standalone conda project were intentionally not copied into this repository.
 Run commands from the repository root with the `trafficlab` conda environment active:
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab
+source /opt/anaconda3/bin/activate trafficlab
 python scripts/trajectory_tools.py smooth output/example.json.gz
 python scripts/trajectory_tools.py plot output/example.smoothed.json.gz --location-code test1
 python scripts/trajectory_tools.py smooth-and-plot output/example.json.gz --ids 7,373 --zoom-to-fit

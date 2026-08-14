@@ -15,7 +15,7 @@ Frames where the YOLO file has no car that frame produce an empty object
 list — there is nothing to crop, so nothing is emitted.
 
 Usage:
-    source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
+    source /opt/anaconda3/bin/activate trafficlab && \\
     PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf_yolo_crop.py \\
         --yolo-boxes-json /Users/eric/Desktop/test21-3sf.json.gz \\
         --g-proj location/test21/G_projection_test21.json

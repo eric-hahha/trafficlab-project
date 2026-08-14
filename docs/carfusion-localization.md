@@ -238,7 +238,7 @@ class CarFusionResult:
 ### 視覺化評估（CCTV + 衛星並排）
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 python scripts/eval_carfusion_sat.py \
     --video   location/test21/footage/test21-4.mp4 \
     --weights /private/tmp/carfusion_weights/weights/last.pt \

@@ -259,7 +259,7 @@ class CarFusionKeypointsResult:
 ### 視覺化評估（CCTV + 衛星並排）
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 python scripts/run_keypoints_carfusion.py \
     --video   location/test21/footage/test21-4.mp4 \
     --weights models/carfusion_last.pt \
