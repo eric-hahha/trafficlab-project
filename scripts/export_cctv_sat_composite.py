@@ -44,6 +44,8 @@ def main():
     p.add_argument('--kp-color-mode', choices=['track', 'part'], default='track',
                    help='Color sat keypoints by vehicle track (default) or by car part '
                         '(wheel/light/plate/mirror/corner/low/up)')
+    p.add_argument('--no-sat-keypoints', action='store_true',
+                   help='Do not draw keypoints on the SAT panel (box/arrow/coords dot/label unaffected)')
     args = p.parse_args()
 
     data = load_replay(args.replay)
@@ -72,7 +74,7 @@ def main():
                                       sat_use_svg=False,
                                       show_3d=False,
                                       show_sat_label=True,
-                                      show_sat_keypoints=True,
+                                      show_sat_keypoints=not args.no_sat_keypoints,
                                       kp_color_mode=args.kp_color_mode)
         painter = QPainter(sat_canvas)
         painter.drawPixmap(0, 0, overlay)
