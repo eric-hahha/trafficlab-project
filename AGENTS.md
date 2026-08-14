@@ -1,430 +1,387 @@
-# TrafficLab AI Instructions
+# TrafficLab AI 指示文件
 
-This file is for AI coding agents working in this repository.
+本檔案是給在這個 repository 裡工作的 AI coding agent 看的操作細節；README 保持面向使用者、簡潔扼要。
 
-## Repository Purpose
+## 工作原則
 
-TrafficLab 3D is a CCTV-to-satellite traffic analysis workflow. The main runtime
-areas are:
+除非明確override，否則這些規則適用於此專案中的每一項任務。
+原則：在非小事的工作上，謹慎優先於速度。小事則依判斷行事。
 
-- Calibration: create `G_projection_<location_code>.json` files under `location/<location_code>/`.
-- Inference: run object detection, tracking, projection, kinematics, and write replay JSON files.
-- Postprocess: correct, smooth, enrich, filter, or visualize replay JSON outputs after inference.
-- Visualization: load replay JSON files and render CCTV/SAT synchronized views in the GUI.
+### 規則 1 — 動手前先思考
+明確說明假設。若不確定，應提問而非用猜的。
+當存在歧義時，提出多種可能的解讀。
+若有更簡單的做法，應提出來討論。
+感到困惑時就停下來，並具體指出不清楚的地方。
 
-Prefer keeping each concern in its own package or script. Do not turn one-off
-experiments into root-level files unless the user explicitly asks for a scratch file.
+### 規則 2 — 遵循該程式碼庫的慣例，即使你不認同
+在程式碼庫裡，「一致性」優先於「個人品味」。
+如果你真心認為某個慣例有害，就提出來討論，不要私自另起爐灶。
 
-## Environment
+### 規則 3 — 手術式修改
+只動你必須動的地方。只清理自己造成的髒亂。
+不要「順便改善」旁邊的程式碼、註解或格式。
+不要重構沒壞的東西。match現有的風格。
 
-- Use the `trafficlab` conda environment for all Python commands.
-- In this repository, the sandbox can activate the environment directly with:
+### 規則 4 — 以目標為導向的執行
+先定義成功標準，反覆執行直到驗證通過。
+不要只是照步驟做，要定義「成功」是什麼並反覆迭代。
+明確的成功標準能讓你獨立地反覆執行。
 
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab
+### 規則 5 — 出問題要大聲說出來
+如果任何東西被悄悄跳過，那「已完成」這個說法就是錯的。
+如果任何測試被跳過，那「測試通過」這個說法就是錯的。
+預設要主動揭露不確定性，而不是隱藏它。
+
+### 規則 6 — 只在需要判斷力時才用到我（模型）
+可以用我做：分類、草擬、摘要、擷取資訊。
+不要用我做：routing、重試、確定性的轉換。
+如果程式碼能處理，就交給程式碼處理。
+
+### 規則 7 — 衝突要攤開來講，不要折衷處理它們或混合使用
+若兩種模式互相矛盾，選一個（較新的／較經過驗證的）。
+說明理由，並標記另一個待清理。
+不要把互相衝突的模式混在一起用。
+
+### 規則 8 — 先讀再寫
+在新增程式碼之前，先讀過相關的 exports、直接呼叫方、共用的 utilities。
+「看起來無關」是很危險的想法。若不確定程式碼為何這樣設計，就提問。
+
+### 規則 9 — 測試要驗證意圖，不只是驗證行為
+測試必須表達出「為什麼這個行為重要」，不能只是「做了什麼」。
+如果商業邏輯改變了，測試卻不會失敗，那這個測試就是錯的。
+
+### 規則 10 — 每完成一個重要步驟就checkpoint一次
+摘要已完成的事、已驗證的事，以及還剩下什麼。
+不要從一個你無法複述清楚的狀態繼續做下去。
+如果你失去脈絡，就停下來重新整理狀態。
+
+## Repository 用途
+
+本專案把車禍影片重建成地圖上的 2D 行車軌跡。以資深貢獻者的標準工作：精準、有效率、重視可維護性與清晰度。
+
+## Repository 結構
+
+```text
+TrafficLab-3D/
+├── main.py                     # GUI 進入點
+├── trafficlab/
+│   ├── gui/                    # PyQt5 GUI 實作
+│   ├── inference/               # GUI 與 CLI 共用的推論 pipeline
+│   ├── projection/              # G-projection 與 SVG projection 的輔助工具
+│   ├── visualization/           # replay 載入與渲染
+│   ├── io/                      # replay/config I/O 輔助工具
+│   ├── motion/                  # 運動學（kinematics）工具
+│   └── trajectory/              # 推論後的軌跡平滑化與靜態繪圖工具
+├── scripts/                     # CLI 輔助工具與維護用工具
+├── location/<location_code>/    # 校正資產、衛星／CCTV 影像、投影檔案與影片素材
+├── output/                      # 產生出來的 model/tracker/config/location replay 輸出結果
+└── models/                      # 本地端的 detector/tracker checkpoint
 ```
 
-- Prefer direct activation over `conda run -n trafficlab ...` in this repo.
-- Reason: `conda run` may fail in sandboxed sessions because Anaconda tries to create temporary files outside the writable area.
-- When running TrafficLab inference or the GUI on Apple Silicon, set `PYTORCH_ENABLE_MPS_FALLBACK=1`.
-- On `device: mps`, do not assume `half: true` is always safe.
-- If inference reaches the model execution stage and then fails with dtype, backend, or FP16-related errors, inspect `half: true` in the selected config before debugging deeper.
+- h-aware / OpenPifPaf：邏輯在 `trafficlab/motion/keypoints_openpifpaf.py`，CLI 入口在 `scripts/run_keypoints_openpifpaf.py`。
+- CarFusion：邏輯在 `trafficlab/motion/keypoints_carfusion.py`，CLI 入口在 `scripts/run_keypoints_carfusion.py`。
 
-## Repository Layout
+## 指令規則
 
-- `main.py`: GUI entry point.
-- `trafficlab/gui/`: PySide6 GUI implementation.
-- `trafficlab/inference/`: inference pipeline shared by the GUI and CLI.
-- `trafficlab/projection/`: G-projection and SVG projection helpers.
-- `trafficlab/visualization/`: replay loading and rendering.
-- `trafficlab/io/`: replay/config I/O helpers.
-- `trafficlab/motion/`: kinematics utilities.
-- `trafficlab/trajectory/`: post-inference trajectory smoothing and static plotting utilities.
-- `scripts/`: CLI helpers and maintenance utilities.
-- `location/<location_code>/`: calibration assets, satellite/CCTV images, projection files, and footage.
-- `output/`: generated model/tracker/config/location replay outputs.
-- `models/`: local detector/tracker checkpoints.
-- `kiro/`: specs and historical task notes; do not treat these as runtime code unless asked.
-
-Keep reusable code under `trafficlab/<domain>/`. Keep thin command-line wrappers
-under `scripts/`. Avoid mixing external project files, sample outputs, pycache,
-or notebooks into runtime packages.
-
-## Command Rules
-
-- Run Python commands from the repository root.
-- From the repository root, `import trafficlab` resolves normally after activating the `trafficlab` environment.
-- If a command must run from outside the repository root, set:
+- 所有 Python 指令都要先啟動 `trafficlab` conda 環境、並從 repository root 執行：
 
 ```bash
-PYTHONPATH=/Users/eric/code/TrafficLab-3D-main
+source /opt/anaconda3/bin/activate trafficlab
 ```
 
-- Exception: `scripts/run_inference.py` does not add the repository root to `sys.path`, so running it by path (`python scripts/run_inference.py`) raises `ModuleNotFoundError: No module named 'trafficlab'` even with `cwd` at the repository root and the `trafficlab` environment active. Always set `PYTHONPATH` explicitly when invoking it — see the commands under "Run inference without the GUI" below.
+- 優先直接啟動環境，不要用 `conda run -n trafficlab ...`（sandbox 裡可能因暫存檔寫入權限失敗，除非直接啟動行不通才用）。
+- 從 repo root 執行時 `import trafficlab` 會正常解析；若指令必須在 repo root 以外執行，設定 `PYTHONPATH=<repo_root>`（例如 `PYTHONPATH=$(pwd)`，在 repo root 下執行時）。`scripts/run_inference.py` 是例外，即使在 repo root 也不會自動加進 `sys.path`，一律要明確帶 `PYTHONPATH`（見下方「YOLO 框定位」）。
+- 只有跑 YOLO 模型時，才需要在 Apple Silicon 上加 `PYTORCH_ENABLE_MPS_FALLBACK=1`（GUI 若可能牽涉到推論也算）；`device: mps` 時不要假設 `half: true` 一定安全。
+- 不要依賴系統的 `python` binary；缺 dependency 時先確認 `trafficlab` 環境已啟動再下結論。
 
-- For regular Python scripts:
+## 常用指令
+
+### 1. 開啟 GUI
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python ...
+source /opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python main.py
 ```
 
-- For inference or GUI commands that may use MPS fallback:
+### 2. YOLO 框定位
+
+透過 `scripts/run_inference.py`（`trafficlab.inference.pipeline.InferencePipeline`）執行 YOLO 偵測＋追蹤＋bbox 投影，是 TrafficLab 原生的定位方法，不使用關鍵點。這是三種定位方法之一（另外兩種是下方的「keypoints-openpifpaf」與「keypoints-carfusion」）— 依情境挑選合適的方法，不要把它當成預設要跑的方法。
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python ...
+source /opt/anaconda3/bin/activate trafficlab && PYTHONPATH=$(pwd) PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name <config_name> <selector>
 ```
 
-- Do not rely on the system `python` binary for project tasks.
-- If a dependency appears missing, first verify that the `trafficlab` environment is active before concluding the package is unavailable.
-- Prefer `python -m py_compile <files>` for quick syntax checks after edits.
-- Do not use `conda run -n trafficlab ...` unless direct activation is impossible.
-- If a command writes outputs for verification, prefer `/private/tmp` or another disposable writable path unless the output is intentionally part of the project.
+- `--all-pending`：處理所有待處理影片
+- `--location <location_code>`：處理單一 location
+- `--mp4 <video_path>`：處理單一 mp4
+- 加 `--force`：即使輸出已存在也強制重跑
+- `<config_name>`：YAML（預設 `infr_cfg_test.yaml`，可用 `--config-path` 換）裡定義的 config key，不填則用檔案裡第一個 config
 
-## Common Commands
-
-### Open the GUI
+### 3. 後處理（Postprocess）
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTORCH_ENABLE_MPS_FALLBACK=1 python main.py
+source /opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
 ```
 
-### Run inference without the GUI
+### 4. keypoints-openpifpaf
 
-Process all pending videos with a chosen config:
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --all-pending
-```
-
-Process one location:
+在每一幀上執行 OpenPifPaf Apollo-24 偵測，並透過 height-aware 關鍵點模板比對來定位每輛車。輸出是標準的 TrafficLab replay JSON，可以在 GUI 中載入（衛星座標位置、車頭朝向、車輛外框，以及 CCTV 關鍵點疊圖）。`--method` 是必填參數，用來選擇三種互斥的逐幀策略之一 — 只有被選中策略自己的 flag 才會生效。
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --location test1
-```
-
-Process one mp4:
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --mp4 location/test1/footage/test1_8_100_s.mp4
-```
-
-Force re-run even if output already exists:
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_inference.py --config-name slight_smoothing_best --location test1 --force
-```
-
-### Postprocess
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
-```
-
-### H-aware 3D keypoint localization
-
-Run OpenPifPaf Apollo-24 detection on every frame and localize each vehicle via
-height-aware keypoint template matching. Output is a standard TrafficLab replay
-JSON loadable in the GUI (satellite position, heading, footprint, and CCTV
-keypoint overlay). `--method` is required and selects one of three mutually
-exclusive per-frame strategies — only the selected strategy's own flags take
-effect.
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
-  --video location/test21/footage/test21-4.mp4 \
-  --g-proj location/test21/G_projection_test21.json \
-  --method geometric
+  --video <video_path> \
+  --g-proj <g_proj_path> \
+  --method <geometric|crop|segmentation>
 ```
 
-Output: `output/haware/<location_code>/<video_stem>.json.gz`
+輸出：`output/haware/<location_code>/<video_stem>.json.gz` — 但 `--localizer wheel_pair` 例外，會寫到 `output/wheel_pair/<location_code>/<video_stem>.json.gz`（獨立資料夾，避免跟同一支影片的 `procrustes`/`reprojection` 輸出互相覆蓋）。
 
-`--method` choices:
+`--method` 選項：
 
-| Method | What it does | Relevant flags |
+| Method | 何時選它 | 相關 flag |
 |--------|---------------|-----------------|
-| `geometric` | Bridge PifPaf detections to YOLO track IDs via bbox IoU. A PifPaf detection with only one confident keypoint has a zero-area bbox and never clears the IoU threshold on its own — a second pass recovers these: if the lone keypoint falls inside exactly one YOLO box, it's merged into the detection already IoU-matched to that track this frame (the fragment is then dropped so it doesn't also appear as its own object), or, if no such detection exists this frame, the fragment is tagged with the track id directly. | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
-| `crop` | Crop each Pass-1 bbox and re-run PifPaf on the crop to recover more confident keypoints. | `--crop-redetect` / `--crop-padding` |
-| `segmentation` | Merge PifPaf fragments that belong to the same vehicle using car-segmenter (YOLO11-seg) instance masks instead of a bbox-IoU heuristic — fixes the general PifPaf instance-splitting case (two multi-keypoint fragments from one vehicle) that `geometric`'s single-keypoint recovery can't. Each PifPaf annotation is assigned to whichever mask contains the majority of its confident keypoints; annotations sharing a mask are merged (higher-confidence keypoint wins per slot); fragments matching no mask are kept unmerged. `tracked_id`/`bbox_2d` come from car-segmenter's own instance (ByteTrack tracker id, mask-derived box) — this method does not use `--yolo`/Method B at all. See `docs/keypoints-openpifpaf-segmentation-matching.md`. | `--seg-model` / `--seg-conf` / `--seg-device` |
+| `geometric` | 沒有明顯 PifPaf instance-splitting 時，用 bbox IoU 把關鍵點對到 YOLO track id | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
+| `crop` | 想從裁切圖重跑 PifPaf、找回更多高信心度關鍵點時用 | `--crop-redetect` / `--crop-padding` |
+| `segmentation` | PifPaf 把同一台車拆成兩塊多關鍵點碎片、`geometric` 修不了時用 — 詳見 `docs/keypoints-openpifpaf-segmentation-matching.md` | `--seg-model` / `--seg-conf` / `--seg-device` |
 
-Shared options:
+共用選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
 | `--checkpoint` | `shufflenetv2k16-apollo-24` | PifPaf model |
-| `--spec-csv` | *(none)* | `engines.csv` from automobile-models-and-specs; falls back to `prior_dimensions.json` then built-in defaults |
-| `--body-type` | `Sedan` | Used with `--spec-csv` |
-| `--kp-conf` | `0.2` | Keypoint confidence threshold |
-| `--frames` | `-1` (all) | Limit frames for quick tests |
-| `--start-frame` | `0` | First frame to process; frames before this are read and discarded, not seeked |
-| `--localizer` | `procrustes` | `procrustes` (closed-form 2D Procrustes) or `reprojection` (nonlinear least-squares fit against PifPaf pixel positions) |
-| `--out` | auto | Override output path |
+| `--spec-csv` | *(無)* | automobile-models-and-specs 的 `engines.csv`；找不到就退回 `prior_dimensions.json`，再找不到就用內建預設值 |
+| `--body-type` | `Sedan` | 與 `--spec-csv` 搭配使用 |
+| `--kp-conf` | `0.2` | 關鍵點信心度閾值 |
+| `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
+| `--start-frame` | `0` | 開始處理的第一幀；在此之前的幀會被讀取後丟棄，而不是用 seek |
+| `--localizer` | `procrustes` | `procrustes`（closed-form 擬合，一般情況）、`reprojection`（非線性最小平方，對 PifPaf 像素位置擬合），或 `wheel_pair`（只用同側前後輪關鍵點，適合僅輪胎清楚可見時 — 詳見 `docs/keypoints-openpifpaf-wheel-pair-localizer.md`） |
+| `--out` | 自動 | 覆寫輸出路徑 |
 
-`--method geometric` options:
+`--method geometric` 選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--yolo` | `models/best.pt` | YOLO model for track-ID matching (ByteTrack); pass `--yolo ""` to disable and leave `tracked_id=None` |
-| `--yolo-conf` | `0.25` | YOLO detection confidence threshold |
-| `--yolo-classes` | *(all)* | Comma-separated YOLO class indices to keep — model-specific, check the `--yolo` model's `.names` |
-| `--iou-threshold` | `0.3` | Minimum bbox IoU to accept a PifPaf↔YOLO match |
-| `--yolo-boxes-json` | *(none)* | Use a pre-computed replay JSON (e.g. `pipeline.py` output) as the YOLO box source instead of running a live model; takes priority over `--yolo` when set |
-| `--yolo-boxes-class` | `car` | `class` value in `--yolo-boxes-json` to treat as a car |
+| `--yolo` | `models/best.pt` | 用於 track-ID 比對的 YOLO model（ByteTrack）；傳入 `--yolo ""` 可停用並讓 `tracked_id=None` |
+| `--yolo-conf` | `0.25` | YOLO 偵測信心度閾值 |
+| `--yolo-classes` | *(全部)* | 要保留的 YOLO class index，以逗號分隔 — 依 model 而異，請檢查 `--yolo` 所指 model 的 `.names` |
+| `--iou-threshold` | `0.3` | 接受 PifPaf↔YOLO 比對所需的最小 bbox IoU |
+| `--yolo-boxes-json` | *(無)* | 使用預先算好的 replay JSON（例如 `pipeline.py` 的輸出）作為 YOLO box 來源，而不是即時跑 model；設定時優先於 `--yolo` |
+| `--yolo-boxes-class` | `car` | `--yolo-boxes-json` 中要視為汽車的 `class` 值 |
 
-`--method crop` options:
+`--method crop` 選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--crop-redetect` | off | Crop each Pass-1 bbox with 50% padding and re-run PifPaf; without this flag `--method crop` is equivalent to plain Pass-1 PifPaf |
-| `--crop-padding` | `0.5` | Fractional padding around the bbox for the crop |
+| `--crop-redetect` | 關閉 | 以 50% padding 裁切每個 Pass-1 bbox 並重新跑 PifPaf；沒有這個 flag 時，`--method crop` 等同於單純的 Pass-1 PifPaf |
+| `--crop-padding` | `0.5` | 裁切時 bbox 周圍的 padding 比例 |
 
-`--method segmentation` options:
+`--method segmentation` 選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--seg-model` | `models/yolo11n-seg.pt` | Ultralytics `*-seg` checkpoint for car-segmenter; auto-downloaded into that path on first use if not present locally |
-| `--seg-conf` | `0.3` | car-segmenter detection confidence threshold |
-| `--seg-device` | *(auto)* | `cuda` / `mps` / `cpu`, or leave unset to let ultralytics pick |
-| `--seg-masks-json` | *(none)* | Path to a `record_car_masks.py` output file supplying per-frame car instances (tracker_id/bbox/mask polygon), used instead of running car-segmenter live. When set, `--seg-model`/`--seg-conf`/`--seg-device` are ignored and car-segmenter is never loaded. |
+| `--seg-model` | `models/yolo11m-seg.pt` | car-segmenter 用的 Ultralytics `*-seg` checkpoint；若本地端沒有，首次使用時會自動下載到該路徑 |
+| `--seg-conf` | `0.3` | car-segmenter 偵測信心度閾值 |
+| `--seg-device` | *(自動)* | `cuda` / `mps` / `cpu`，或不設定讓 ultralytics 自行選擇 |
+| `--seg-masks-json` | *(無)* | 指向 `record_car_masks.py` 輸出檔案的路徑，提供逐幀的汽車 instance（tracker_id/bbox/mask polygon），用它取代即時執行 car-segmenter。設定此參數時，`--seg-model`/`--seg-conf`/`--seg-device` 會被忽略，car-segmenter 也完全不會被載入。 |
 
-Per-object fields added beyond the standard 14: `kp_cctv` (raw `[x, y, conf] × 24`
-for GUI overlay), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
-`failed_insufficient_kp`).
+在標準 14 個欄位之外，每個物件會新增的欄位：`kp_cctv`（GUI 疊圖用的原始 `[x, y, conf] × 24`）、`n_keypoints`、`status`（`ok` / `ambiguous_heading` / `failed_insufficient_kp`）。
 
-#### Recording car-segmenter masks once for reuse
+#### 一次錄製 car-segmenter mask 供重複使用
 
-`--method segmentation` normally runs car-segmenter live, once per invocation.
-If the same video needs both `--localizer procrustes` and `--localizer
-reprojection` passes, that runs YOLO11-seg twice for identical output. Record
-it once instead and point both passes at the same file:
+`--method segmentation` 通常每次執行都會即時跑一次 car-segmenter。如果同一支影片需要同時跑 `--localizer procrustes` 和 `--localizer reprojection` 兩個 pass，就會對相同的輸出跑兩次 YOLO11-seg，改成只錄製一次、兩個 pass 共用：
+
+1. 錄製一次：
 
 ```bash
-python scripts/record_car_masks.py --video location/test21/footage/test21-4.mp4
+python scripts/record_car_masks.py --video <video_path>
 ```
 
-Output: `output/car_masks/<location_code>/seg-mask_<video_stem>.json.gz` (pure image-space
-recording — no G-projection, no PifPaf). Then:
+輸出：`output/car_masks/<location_code>/seg-mask_<video_stem>.json.gz`（純影像空間的紀錄 — 沒有 G-projection，也沒有 PifPaf）。
+
+2. 兩個 pass 都指向同一份 mask 檔：
 
 ```bash
-python scripts/run_keypoints_openpifpaf.py --video location/test21/footage/test21-4.mp4 \
-  --g-proj location/test21/G_projection_test21.json --method segmentation \
-  --seg-masks-json output/car_masks/test21/seg-mask_test21-4.json.gz --localizer procrustes
+python scripts/run_keypoints_openpifpaf.py --video <video_path> \
+  --g-proj <g_proj_path> --method segmentation \
+  --seg-masks-json <mask_json_path> --localizer procrustes
 
-python scripts/run_keypoints_openpifpaf.py --video location/test21/footage/test21-4.mp4 \
-  --g-proj location/test21/G_projection_test21.json --method segmentation \
-  --seg-masks-json output/car_masks/test21/seg-mask_test21-4.json.gz --localizer reprojection
+python scripts/run_keypoints_openpifpaf.py --video <video_path> \
+  --g-proj <g_proj_path> --method segmentation \
+  --seg-masks-json <mask_json_path> --localizer reprojection
 ```
 
-### Reprojection keypoint visualization
+### 5. 重投影關鍵點視覺化
 
-Plot per-vehicle `kp_sat` keypoint reprojections and `sat_coords` positions
-from an h-aware (or other replay-shaped) JSON onto the satellite image for a
-single frame. Each keypoint gets a black leader line to a
-`tracked_id-keypoint_name` label; vehicle position points are drawn larger
-with a black edge (keypoints use a white edge) and are not labeled.
+把 replay JSON 裡單一 frame 的逐車輛 `kp_sat`/`sat_coords` 重投影結果畫到衛星影像上，用於檢查重投影結果。
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 python scripts/plot_reprojection_keypoints.py \
-  output/haware/test21/test21-6_yolo_reprojection.json.gz \
-  --frame-index 76
+  <replay_json_path> \
+  --frame-index <N>
 ```
 
-Options:
+選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--frame-index` | auto | Frame to plot; default auto-picks the frame with the most valid keypoints |
-| `--ids` | *(all)* | Comma-separated `tracked_id` values to include |
-| `--location-code` | inferred | Override inferred location code |
-| `--sat-image` | inferred | Override satellite image path |
-| `-o` / `--out` | next to input | Output PNG path |
-| `--dpi` | `200` | Output resolution |
+| `--frame-index` | 自動 | 要繪製的 frame；預設會自動挑選有效關鍵點最多的那一幀 |
+| `--ids` | *(全部)* | 要納入的 `tracked_id` 值，以逗號分隔 |
+| `--location-code` | 自動推斷 | 覆寫推斷出的 location code |
+| `--sat-image` | 自動推斷 | 覆寫衛星影像路徑 |
+| `-o` / `--out` | 與輸入檔同層 | 輸出 PNG 路徑 |
+| `--dpi` | `200` | 輸出解析度 |
 
-Output: PNG saved next to the input JSON by default
-(`<stem>.keypoints_frame<N>.png`).
+輸出：預設把 PNG 存在輸入 JSON 旁邊（`<stem>.keypoints_frame<N>.png`）。
 
-### CCTV + SAT composite export
+### 6. CCTV + SAT 合成輸出
 
-Batch-render an entire h-aware (or other replay-shaped) JSON to PNGs, reusing
-the GUI's own headless renderers (`CCTRenderer`, `SatRenderer`) — no new
-drawing logic. Default mode writes one PNG per frame with the CCTV frame on
-the left and the SAT overlay (boxes/arrows/labels/keypoints) on the right,
-scaled to the same height and placed side by side.
+把整份 replay JSON 批次渲染成 PNG：預設每幀左 CCTV、右 SAT 疊圖，並排輸出。
 
 ```bash
 QT_QPA_PLATFORM=offscreen python scripts/export_cctv_sat_composite.py \
-  --replay output/haware/test21/test21-4.json.gz \
-  --out-dir output/haware/test21/composite
+  --replay <replay_json_path> \
+  --out-dir <out_dir>
 ```
 
-Options:
+選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--replay` | *(required)* | Path to replay `.json`/`.json.gz` |
-| `--out-dir` | *(required)* | Directory to write per-frame PNGs |
-| `--cctv-video` | `mp4_path` in replay | Override video path |
-| `--sat-image` | `location/<code>/sat_<code>.png` | Override SAT background path |
-| `--kp-conf` | `0.2` | Keypoint confidence threshold used only to derive a 2D box when `bbox_2d` is missing |
-| `--sat-only` | off | Skip the CCTV panel and hstack entirely — writes just the SAT overlay, and skips opening the video file since it's not needed |
-| `--kp-color-mode` | `track` | `track` colors each vehicle's keypoints by its track color (default, matches GUI); `part` colors by car part instead (wheel/light/plate/mirror/corner/low/up), same color across vehicles |
+| `--replay` | *(必填)* | replay `.json`/`.json.gz` 的路徑 |
+| `--out-dir` | *(必填)* | 逐幀 PNG 的輸出目錄 |
+| `--cctv-video` | replay 裡的 `mp4_path` | 覆寫影片路徑 |
+| `--sat-image` | `location/<code>/sat_<code>.png` | 覆寫 SAT 背景圖路徑 |
+| `--kp-conf` | `0.2` | 僅在缺少 `bbox_2d` 時，用來推導 2D box 的關鍵點信心度閾值 |
+| `--sat-only` | 關閉 | 完全跳過 CCTV 面板與水平拼接 — 只輸出 SAT 疊圖，也因為不需要而跳過開啟影片檔 |
+| `--kp-color-mode` | `track` | `track` 依每輛車的 track 顏色來上色（預設，與 GUI 一致）；`part` 改為依車輛部位上色（wheel/light/plate/mirror/corner/low/up），同部位跨車輛使用相同顏色 |
 
-Output: `frame_<NNNN>.png` per frame in `--out-dir`. To turn the sequence into
-a video:
+輸出：`--out-dir` 裡每幀一張 `frame_<NNNN>.png`。要把這些幀轉成影片：
 
 ```bash
-ffmpeg -framerate 25 -i output/haware/test21/composite/frame_%04d.png \
+ffmpeg -framerate 25 -i <out_dir>/frame_%04d.png \
   -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -pix_fmt yuv420p \
-  output/haware/test21/composite.mp4
+  <out_dir>/composite.mp4
 ```
 
-(the `pad` filter is only needed when the composite width/height comes out
-odd, which `libx264` rejects.)
+（只有在合成出來的寬／高是奇數、`libx264` 不接受時，才需要 `pad` filter。）
 
-### CarFusion vehicle pose + tracking
+### 7. keypoints-carfusion
 
-Run CarFusion's YOLOv8-Pose model (one-stage bbox + 14 keypoints) on every
-frame with ByteTrack cross-frame tracking enabled, project keypoints to
-satellite coordinates, and fit vehicle center/heading via Procrustes SVD.
-Output is a side-by-side CCTV+SAT composite per frame plus a standard
-TrafficLab replay JSON loadable in the GUI.
+在每一幀上執行 CarFusion 的 YOLOv8-Pose model（單階段 bbox + 14 個關鍵點），並啟用 ByteTrack 跨幀追蹤，把關鍵點投影到衛星座標定位每輛車。輸出是每幀一張的 CCTV+SAT 並排合成圖，外加一份標準的 TrafficLab replay JSON 可載入 GUI。
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 python scripts/run_keypoints_carfusion.py \
-  --video location/test21/footage/test21-4.mp4 \
+  --video <video_path> \
   --weights models/carfusion_last.pt \
-  --g-proj location/test21/G_projection_test21.json \
-  --sat location/test21/sat_test21.png \
-  --out /private/tmp/carfusion_sat/
+  --g-proj <g_proj_path> \
+  --sat <sat_image_path> \
+  --out <out_dir>
 ```
 
-Output: composite JPGs + `scatter.png` + `detections.json` under `--out`.
+輸出：合成 JPG + `scatter.png` + `detections.json`，都在 `--out` 底下。
 
-Options:
+選項：
 
-| Flag | Default | Notes |
+| Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--weights` | `models/carfusion_last.pt` | YOLOv8-Pose weights |
-| `--start-frame` | `0` | First frame to process |
-| `--frames` | `-1` (all) | Limit frames for quick tests |
-| `--conf` | `0.25` | YOLO detection threshold — only decides what YOLO hands to the tracker, not what survives it (see below) |
-| `--kp-conf` | `0.2` | Per-keypoint confidence threshold |
-| `--tracker` | `trafficlab/inference/bytetrack.yaml` | Pinned ByteTrack config; not the bare ultralytics package default |
+| `--weights` | `models/carfusion_last.pt` | YOLOv8-Pose 權重 |
+| `--start-frame` | `0` | 開始處理的第一幀 |
+| `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
+| `--conf` | `0.25` | YOLO 偵測閾值 — 只決定 YOLO 交給 tracker 的內容，不決定最後留下什麼（見下方） |
+| `--kp-conf` | `0.2` | 每個關鍵點的信心度閾值 |
+| `--tracker` | `trafficlab/inference/bytetrack.yaml` | 固定版本的 ByteTrack config；不是原生 ultralytics 套件的預設值 |
 
-Tracking notes:
-- `.track()` mode can drop a whole detection from the output entirely (not
-  leave `tracked_id=None`) if ByteTrack never confirms it as a track. This is
-  independent of `--conf` — see `docs/keypoints-carfusion-tracking.md` for the
-  `is_activated` / `fuse_score` mechanics behind this.
-- `trafficlab/inference/bytetrack.yaml` currently has `track_high_thresh` /
-  `track_low_thresh` / `new_track_thresh` lowered to `0.01` and
-  `fuse_score: False`, tuned for low-confidence / partially-cropped vehicles.
-  Check this file's current values before assuming ultralytics defaults apply.
+追蹤相關注意事項：
+- `trafficlab/inference/bytetrack.yaml` 目前把 `track_high_thresh` / `track_low_thresh` / `new_track_thresh` 調低到 `0.01`，`fuse_score: False`，是針對低信心度／部分遮蔽車輛調整過的。在假設套用 ultralytics 預設值之前，先檢查這個檔案目前的實際數值。
 
-Per-object fields beyond the standard shape: `bbox_2d`, `bbox_cctv`, `kp_cctv`
-(raw `[x, y, conf] × 14`), `n_keypoints`, `status` (`ok` / `ambiguous_heading` /
-`failed_insufficient_kp`), `have_heading`, `have_measurements`,
-`sat_floor_box`, `bbox_3d`. Top-level: `mp4_path`, `meta`, `location_code`,
-`mp4_frame_count`, `animation_frame_count`.
+在標準欄位之外，每個物件額外新增的欄位：`bbox_2d`、`bbox_cctv`、`kp_cctv`（原始 `[x, y, conf] × 14`）、`n_keypoints`、`status`（`ok` / `ambiguous_heading` / `failed_insufficient_kp`）、`have_heading`、`have_measurements`、`sat_floor_box`、`bbox_3d`。頂層欄位：`mp4_path`、`meta`、`location_code`、`mp4_frame_count`、`animation_frame_count`。
 
-To backfill these fields into a `detections.json` generated before this schema
-existed, without re-running detection/tracking:
+要在不重新跑偵測／追蹤的情況下，把這些欄位回填到這個 schema 出現之前產生的 `detections.json`：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && \
+source /opt/anaconda3/bin/activate trafficlab && \
 python scripts/archive/patch_carfusion_replay_fields.py \
-  --json /path/to/detections.json \
-  --video location/test21/footage/test21-4.mp4 \
-  --g-proj location/test21/G_projection_test21.json
+  --json <detections_json_path> \
+  --video <video_path> \
+  --g-proj <g_proj_path>
 ```
 
-### Trajectory smoothing and plotting
+### 8. 軌跡繪圖
 
-The integrated trajectory tools live in `trafficlab/trajectory/` and are exposed
-through `scripts/trajectory_tools.py`.
-
-Show help:
+涵蓋 `plot`（整條軌跡所有點畫一張圖）與 `frames`（對選定 id 用同一個固定裁切窗口逐幀輸出 PNG，適合接 ffmpeg 轉影片、畫面不跳動）：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
+source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py <plot|frames> <replay_json_path> [flags]
 ```
 
-Smooth one replay JSON:
+| Flag | 適用 | 說明 |
+|---|---|---|
+| `--location-code` / `--sat-image` | 兩者皆可 | replay 缺 `location_code` metadata 時擇一必填；否則預設找 `location/<location_code>/sat_<location_code>.png` |
+| `--ids` | 兩者皆可 | 篩選 `tracked_id`，逗號分隔 |
+| `--zoom-margin`（`plot` 需搭配 `--zoom-to-fit`） | 兩者皆可 | 預設 `200`，衛星影像像素；裁切窗口是對軌跡 bounding box 加 padding 算出來的，會視需要放大到跟原圖同比例避免 `imshow` 變形 |
+| `--show-heading-arrows` / `--show-keypoints`（`frames` 預設顯示，用 `--hide-heading-arrows`/`--hide-keypoints` 關閉） | 兩者皆可 | `--show-keypoints` 依部位（wheel/light/plate/mirror/corner/low/up）上色，跟「CCTV + SAT 合成輸出」`--kp-color-mode part` 同一套配色 |
+| `--show-id-labels` | 僅 `plot` | 可見軌跡旁渲染同色 `tracked_id` 標籤 |
+| `--min-points` | 僅 `plot` | 預設跳過少於 5 點的 track |
+| `--include-out-of-bounds` | 僅 `plot` | 預設跳過完全在衛星影像外的 track |
+| `--out-dir` | 僅 `frames` | 逐幀 PNG 輸出目錄（必填） |
+
+`plot` 跟 `frames` 差別一句話：`plot` 把整條軌跡所有點畫在同一張圖；`frames` 用同一個固定裁切窗口，對選定 id 出現過的每一幀各輸出一張 PNG。
+
+顯示完整說明：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth output/example.json.gz
+source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
 ```
 
-Plot one replay JSON:
+### 9. 軌跡平滑化
+
+只涵蓋 `smooth`（與其合併捷徑 `smooth-and-plot`）：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py plot output/example.smoothed.json.gz --location-code test1
+source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth <replay_json_path>
 ```
 
-Smooth and plot selected tracks:
+| Flag | 說明 |
+|---|---|
+| `-o`/`--output` | 覆寫輸出路徑；預設 `<stem>.smoothed.json[.gz]`，存在輸入檔旁邊 |
+| `--window-length` | Savitzky-Golay 窗口長度；短於這個長度的 track 不會被改動 |
+
+平滑化用 Savitzky-Golay 濾波、依 `tracked_id` 分組。
+
+要平滑化＋繪圖一次做完：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth-and-plot output/example.json.gz --ids 7,373 --zoom-to-fit
+source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth-and-plot <replay_json_path> [smooth flags] [plot flags]
 ```
 
-If the replay file does not contain `location_code` metadata, pass either
-`--location-code <code>` or `--sat-image <path>`.
+flag 是 `smooth` 與上一節「軌跡繪圖」`plot` 的合集，繪圖相關 flag 見上一節。
 
-Zoom in on a specific vehicle and overlay its keypoints:
+### 10. 對 script 做語法檢查
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py plot output/example.json.gz \
-  --ids 0 --zoom-to-fit --zoom-margin 100 --show-heading-arrows --show-keypoints
+source /opt/anaconda3/bin/activate trafficlab && python -m py_compile scripts/run_inference.py
 ```
 
-`--zoom-margin` (default `200`) is the padding added around the selected
-trajectory's bounding box, in satellite-image pixels; the crop window is then
-grown as needed to match the satellite image's own aspect ratio so `imshow`
-isn't stretched. `--show-keypoints` overlays `kp_sat`, colored by keypoint
-name (wheel/light/plate/mirror/corner/low/up) — the same palette as
-`--kp-color-mode part` under "CCTV + SAT composite export".
+## 推論相關注意事項
 
-Render one PNG per frame with the crop window held fixed across every frame
-(for frame-by-frame comparison or turning into a video):
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py frames output/example.json.gz \
-  --ids 0 --zoom-margin 100 --out-dir output/frames_id0
-```
-
-`frames` differs from `plot`: `plot` draws every point of a trajectory onto
-one image; `frames` computes a single fixed crop window from the selected
-id(s)' full trajectory (across all frames) once, then renders one PNG per
-frame that id appears in (position dot, heading arrow, keypoints with
-leader-line labels) — all frames share that same crop window, so the view
-doesn't jump around, which is what you want when feeding the sequence to
-`ffmpeg`. Use `--hide-heading-arrows`/`--hide-keypoints` to turn off either
-layer.
-
-### Syntax check a script
-
-```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python -m py_compile scripts/run_inference.py
-```
-
-## Inference Notes
-
-- The GUI inference tab and `scripts/run_inference.py` both use `trafficlab.inference.pipeline.InferencePipeline`.
-- Location inputs are expected under `location/<location_code>/footage/*.mp4`.
-- G-projection files are expected at one of:
+- GUI 的 inference 分頁與 `scripts/run_inference.py` 都使用 `trafficlab.inference.pipeline.InferencePipeline`。
+- Location 的輸入應該放在 `location/<location_code>/footage/*.mp4` 底下。
+- G-projection 檔案應該放在以下其中一個位置：
   - `location/<location_code>/G_projection_<location_code>.json`
   - `location/<location_code>/G_projection_svg_<location_code>.json`
-- Outputs are written under:
+- 輸出會寫到：
 
 ```text
 output/model-<model_name>_tracker-<tracker_name>/<config_name>/<location_code>/*.json.gz
 ```
 
-## Replay JSON Expectations
+- 比較 GUI 與 CLI 的推論行為時，要用相同的 config name、mp4、環境與工作目錄。
 
-Most post-inference tools expect the standard replay shape:
+## Replay JSON 格式預期
+
+大部分推論後工具預期的是標準的 replay 格式：
 
 ```json
 {
@@ -444,75 +401,31 @@ Most post-inference tools expect the standard replay shape:
 }
 ```
 
-- `tracked_id` links the same object across frames.
-- `sat_coords` is the canonical satellite point used by smoothing and plotting.
-- `sat_center` should be updated with `sat_coords` when a tool intentionally moves satellite points.
-- `class` is optional for plotting but useful for summaries and filtering.
-- `.json.gz` is the normal storage format for inference outputs; tools should preserve gzip support.
+- `tracked_id` 用來連接跨幀的同一個物件。
+- `sat_coords` 是平滑化與繪圖使用的標準衛星座標點。
+- 當某個工具刻意移動衛星座標點時，`sat_center` 應該同步更新為 `sat_coords`。
+- `class` 對繪圖來說是選填的，但對摘要與過濾很有用。
+- `.json.gz` 是推論輸出的標準儲存格式；工具應該要保留 gzip 支援。
 
-## Trajectory Tools Notes
+## 驗證檢查清單
 
-- `trafficlab/trajectory/io.py` handles `.json` / `.json.gz` I/O and path resolution.
-- `trafficlab/trajectory/smoothing.py` smooths `sat_coords` with Savitzky-Golay filtering grouped by `tracked_id`.
-- `trafficlab/trajectory/plotting.py` renders trajectory points on a satellite image using matplotlib's non-interactive `Agg` backend.
-- `scripts/trajectory_tools.py` is intentionally a thin CLI wrapper.
-- Plotting skips tracks with fewer than 5 points by default. Use `--min-points` to override this.
-- Plotting skips tracks that are completely outside the satellite image bounds by default. Use `--include-out-of-bounds` to override this.
-- Use `--show-id-labels` to render same-color `tracked_id` labels next to visible trajectories.
-- Use `--zoom-to-fit` with `--zoom-margin` (default `200`, satellite-image pixels) to zoom in on the selected trajectory; the crop window is computed by padding the trajectory's bounding box directly, not via some ratio tied to the source image's own size (raising `margin_px` reliably widens the view — it doesn't asymptote to almost no effect).
-- Use `--show-keypoints` to overlay `kp_sat` keypoints on the trajectory plot, colored by part (wheel/light/plate/mirror/corner/low/up).
-- The `frames` subcommand (`TrajectoryPlotter.compute_zoom_transform()` + `.plot_frame()`) renders one image per frame at a single fixed viewport — the crop window is computed once and shared across every frame, instead of each frame independently zoom-to-fitting (which would make the view jump around). Keypoint labels reuse `plot()`'s `show_id_labels` overlap-avoidance placement logic (`_label_placement`/`_estimate_label_box`/the added `_draw_kp_label`) rather than a separate implementation.
-- Tracks shorter than `--window-length` are left unchanged.
-- The plotter looks for `location/<location_code>/sat_<location_code>.png` unless `--sat-image` is supplied.
-- Do not reintroduce the old standalone `/Users/eric/code/traffic-trajectory-smooth` file layout into this repository. Integrate reusable logic into `trafficlab/trajectory/` and keep sample data outside the repo unless explicitly requested.
+對程式碼變更，執行範圍最小、但有效的檢查：
 
-## External Integration Policy
-
-When integrating another local project or script:
-
-- Inspect the source project first and identify reusable logic, entry points, data files, generated outputs, and environment files.
-- Copy or port only reusable source code and necessary documentation.
-- Do not copy `.git/`, `.DS_Store`, `__pycache__/`, generated PNG/JSON outputs, sample datasets, or standalone environment files unless the user explicitly asks.
-- Put reusable library code under a clear `trafficlab/<domain>/` package.
-- Put runnable wrappers under `scripts/`.
-- Add a short domain README when the integration creates a new subsystem.
-- Prefer adapting code to existing TrafficLab I/O formats instead of creating parallel formats.
-- Preserve existing user changes in the working tree. If unrelated files are already modified, do not revert or reformat them.
-
-## Verification Checklist
-
-For code changes, run the narrowest useful checks:
-
-- Syntax check touched Python files:
+- 對改動過的 Python 檔案做語法檢查：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python -m py_compile path/to/file.py
+source /opt/anaconda3/bin/activate trafficlab && python -m py_compile path/to/file.py
 ```
 
-- CLI help for changed scripts:
+- 對改動過的 script 檢查 CLI help：
 
 ```bash
-source /Users/eric/opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
+source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
 ```
 
-- For trajectory changes, omit `-o` / `--output` / `--plot-output` so outputs land next to the input JSON by default. Only redirect to `/private/tmp` for pure syntax/smoke tests that produce no meaningful artifact.
-- For inference changes, use the same config name, mp4, environment, and working directory when comparing GUI and CLI behavior.
-- For GUI changes, launch with MPS fallback when inference may be touched.
+## 產生檔案與 Git 衛生守則
 
-## Generated Files and Git Hygiene
+- 預設輸出放進 `output/`；只有純語法檢查／smoke-test 這類用後即丟的產出，才寫到 `/private/tmp`。驗證軌跡工具的改動時，省略 `-o`/`--output`/`--plot-output`，讓輸出留在預設路徑（輸入 JSON 旁邊）就好。
+- 回報完成之前，先檢查 `git status --short`，把自己的變更和使用者原本就有的變更區分開來。
+- 絕對不要還原使用者無關的變更。
 
-- Do not commit or intentionally add `__pycache__/`, `.pyc`, `.DS_Store`, temporary plots, or throwaway JSON outputs.
-- Prefer `/private/tmp` only for pure smoke-test artifacts (syntax checks, throwaway outputs). Trajectory plot and smooth outputs should use the default path next to the input JSON.
-- Generated inference outputs belong under `output/` only when the user wants to keep them.
-- Before reporting completion, check `git status --short` and distinguish your changes from pre-existing user changes.
-- Never revert unrelated user changes.
-
-## Agent Expectations
-
-- If you need to run Python code, activate `trafficlab` and then use `python ...`.
-- If you need to run inference, activate `trafficlab` and then use `PYTHONPATH=/Users/eric/code/TrafficLab-3D-main PYTORCH_ENABLE_MPS_FALLBACK=1 python ...`.
-- If you compare GUI behavior and CLI behavior, keep the config name, mp4, environment, and working directory the same before drawing conclusions.
-- Do not blame `half: true` for a failure unless the command has already reached actual inference/model execution and the error is consistent with FP16 or MPS backend issues.
-- Keep README user-facing and concise. Put agent-only operational details here in `AGENTS.md`.
-- Prefer small, focused changes over broad rewrites.
-- When adding a new subsystem, document where it lives, how to run it, and what files should not be mixed into it.
