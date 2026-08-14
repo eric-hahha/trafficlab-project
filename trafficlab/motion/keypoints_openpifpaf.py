@@ -240,6 +240,25 @@ _FR_WHEEL_PAIRS = [
 _EXCLUDE_FROM_MIDPOINT = frozenset([2, 3, 12, 13, 22, 23, 9, 17])
 
 
+# Module-level copies of two of localize_reprojection's local helper
+# functions (same formulas as the identically-named closures defined inside
+# that method), so localize_wheel_pair can reuse the exact, already-verified
+# geometry/heading conventions instead of re-deriving them. localize_reprojection
+# itself is left untouched — its own local closures still do the work there.
+def _rotation_from_vectors(v_body, v_world):
+    """Proper 2D rotation R with R @ v_body pointing along v_world
+    (angle-matching only — magnitude/scale mismatch is ignored)."""
+    ang = math.atan2(v_world[1], v_world[0]) - math.atan2(v_body[1], v_body[0])
+    c, sn = math.cos(ang), math.sin(ang)
+    return np.array([[c, -sn], [sn, c]])
+
+
+def _heading_from_forward(fwd):
+    # atan2(dy, dx), no negation — matches kinematics.py / sat_renderer.py
+    # convention (see localize()'s Step 3 comment for why this sign matters).
+    return math.degrees(math.atan2(fwd[1], fwd[0])) % 360.0
+
+
 @dataclass
 class OpenPifPafKeypointsResult:
     sat_coords:  Optional[tuple]         # (x, y) sat-image pixels; None on failure
@@ -531,6 +550,79 @@ class OpenPifPafKeypointsLocalizer:
             status='ok',
             p_sat=p_sat,
             method=method,
+        )
+
+    def localize_wheel_pair(self, kp_24: np.ndarray) -> OpenPifPafKeypointsResult:
+        """Localize using ONLY one same-side front/rear wheel pair —
+        deliberately ignores every other keypoint even when confidently
+        visible (not a fallback; see docs/keypoints-openpifpaf-wheel-pair-localizer.md).
+
+        Side selection: a side qualifies iff BOTH its wheels clear kp_conf;
+        the left pair (7, 8) is preferred if both sides qualify (same
+        first-match convention as _FR_WHEEL_PAIRS elsewhere in this file).
+
+        Position: midpoint of the two projected wheels, shifted perpendicular
+        to the observed front-rear vector by a per-vehicle-scaled half track
+        width. Reuses localize_reprojection Method 2's sign-safe technique
+        (P[i] - template[i,0]*s*shift_world) — using the wheel's own signed
+        template x-coordinate keeps the shift direction correct for either
+        side pair without an explicit left/right branch — generalized here
+        with an extra scale_ratio factor so the shift reflects this specific
+        vehicle's actual wheelbase vs. the template's.
+
+        Heading: front->rear wheel vector through _heading_from_forward, the
+        same formula/convention localize_reprojection's fr_pair branches use.
+        """
+        qualifying = [(f, r) for f, r in _FR_WHEEL_PAIRS
+                      if kp_24[f, 2] >= self.kp_conf and kp_24[r, 2] >= self.kp_conf]
+        if not qualifying:
+            return OpenPifPafKeypointsResult(
+                sat_coords=None, heading=None, confidence=0.0,
+                n_keypoints=0, status='failed_insufficient_kp', p_sat={},
+            )
+        front_idx, rear_idx = qualifying[0]
+
+        s = self._s
+        front_sat = np.array(self.g_engine.cctv_to_sat(
+            float(kp_24[front_idx, 0]), float(kp_24[front_idx, 1]),
+            h=float(self.template[front_idx, 1])))
+        rear_sat = np.array(self.g_engine.cctv_to_sat(
+            float(kp_24[rear_idx, 0]), float(kp_24[rear_idx, 1]),
+            h=float(self.template[rear_idx, 1])))
+        p_sat = {front_idx: tuple(front_sat), rear_idx: tuple(rear_sat)}
+
+        v_body = self.template[[front_idx, rear_idx]][:, [0, 2]]
+        v_body = v_body[1] - v_body[0]             # rear - front, template (x, z)
+        v_world = rear_sat - front_sat              # rear - front, sat pixels
+        R = _rotation_from_vectors(v_body, v_world)
+        shift_world = R @ np.array([1.0, 0.0])      # world dir matching body +x (lateral)
+
+        mid_world = (front_sat + rear_sat) / 2.0
+        template_fr_dist_m = float(abs(self.template[rear_idx, 2] - self.template[front_idx, 2]))
+        actual_fr_dist_m = float(np.linalg.norm(v_world)) / s
+        scale_ratio = actual_fr_dist_m / template_fr_dist_m if template_fr_dist_m > 0 else 1.0
+
+        template_x = float(self.template[front_idx, 0])  # signed; same for both wheels of a pair
+        # NOTE the '+' here, not '-': _rotation_from_vectors maps template (x,z)
+        # to sat-pixel (x,y) as a plain proper rotation, but the two coordinate
+        # pairs have opposite handedness (template (x,z) with x=left/z=rear is
+        # right-handed against true bird's-eye rotation; sat-pixel (x,y) with
+        # y-down is left-handed against it) — so shift_world, which the code
+        # derives to represent template's +x/"vehicle-left" axis, actually
+        # points physically right. Adding (instead of subtracting) corrects
+        # for that mismatch; verified against real front/rear sat coordinates
+        # (a left-side wheel pair must land to its physical right).
+        center = mid_world + template_x * scale_ratio * s * shift_world
+
+        heading = _heading_from_forward(front_sat - rear_sat)
+
+        return OpenPifPafKeypointsResult(
+            sat_coords=tuple(center),
+            heading=heading,
+            confidence=0.4,
+            n_keypoints=2,
+            status='ok',
+            p_sat=p_sat,
         )
 
 

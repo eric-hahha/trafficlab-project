@@ -23,7 +23,7 @@ Each strategy's own flags keep their existing meaning and defaults; --method
 only decides which one actually runs this invocation.
 
 Usage:
-    source /Users/eric/opt/anaconda3/bin/activate trafficlab && \\
+    source /opt/anaconda3/bin/activate trafficlab && \\
     PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \\
         --video location/test21/footage/test21-4.mp4 \\
         --g-proj location/test21/G_projection_test21.json \\
@@ -84,6 +84,8 @@ def _localize_and_assemble(kp_24, obj_id, tracked_id, bbox_2d, localizer, locali
     """
     if localizer_name == 'reprojection':
         result = localizer.localize_reprojection(kp_24)
+    elif localizer_name == 'wheel_pair':
+        result = localizer.localize_wheel_pair(kp_24)
     else:
         result = localizer.localize(kp_24)
 
@@ -289,8 +291,8 @@ def main():
     parser.add_argument('--yolo-boxes-class', default='car',
                         help='class value in --yolo-boxes-json to treat as a car (default "car")')
     # segmentation matching: car-segmenter instance masks (only when --method segmentation)
-    parser.add_argument('--seg-model', default='models/yolo11n-seg.pt',
-                        help='Ultralytics *-seg checkpoint for car-segmenter (default models/yolo11n-seg.pt); '
+    parser.add_argument('--seg-model', default='models/yolo11m-seg.pt',
+                        help='Ultralytics *-seg checkpoint for car-segmenter (default models/yolo11m-seg.pt); '
                              'auto-downloaded into that path on first use if not present locally')
     parser.add_argument('--seg-conf', type=float, default=0.3,
                         help='car-segmenter detection confidence threshold (default 0.3)')
@@ -309,11 +311,14 @@ def main():
                              'are read and discarded, not seeked — CAP_PROP_POS_FRAMES '
                              'seeking has been unreliable on some test videos. --frames counts '
                              'from this point, not from frame 0.')
-    parser.add_argument('--localizer', choices=['procrustes', 'reprojection'], default='procrustes',
+    parser.add_argument('--localizer', choices=['procrustes', 'reprojection', 'wheel_pair'], default='procrustes',
                         help='procrustes = closed-form 2D Procrustes on lifted sat coords '
                              '(default); reprojection = fit the 3D template directly against '
                              'PifPaf pixel positions via nonlinear least-squares '
-                             '(OpenPifPafKeypointsLocalizer.localize_reprojection)')
+                             '(OpenPifPafKeypointsLocalizer.localize_reprojection); '
+                             'wheel_pair = position/heading from a single same-side front/rear '
+                             'wheel pair only, ignoring every other keypoint '
+                             '(OpenPifPafKeypointsLocalizer.localize_wheel_pair)')
     args = parser.parse_args()
 
     if args.method == 'geometric' and not args.yolo and not args.yolo_boxes_json:
@@ -467,7 +472,10 @@ def main():
         out_path = args.out
     else:
         video_stem = os.path.splitext(os.path.basename(args.video))[0]
-        out_path = os.path.join('output', 'haware', location_code, f'{video_stem}.json.gz')
+        # wheel_pair writes to its own subfolder rather than output/haware/ so
+        # it never collides with a procrustes/reprojection run on the same video.
+        out_base = 'wheel_pair' if args.localizer == 'wheel_pair' else 'haware'
+        out_path = os.path.join('output', out_base, location_code, f'{video_stem}.json.gz')
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
     # --- Replay JSON skeleton ---
