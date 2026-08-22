@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config-path",
-        default="infr_cfg_test.yaml",
+        default="inference_config.yaml",
         help="Path to the inference YAML config.",
     )
     parser.add_argument(
@@ -80,7 +80,8 @@ def output_base_dir(output_root: Path, selected_cfg: dict, config_name: str) -> 
     from trafficlab.inference.pipeline import InferencePipeline
     weights = selected_cfg.get("model", {}).get("weights", "Unknown")
     tracker_type = selected_cfg.get("tracking", {}).get("tracker_type", "default")
-    return Path(InferencePipeline.config_output_dir(output_root, weights, tracker_type, config_name))
+    is_seg = selected_cfg.get("model", {}).get("type") == "seg"
+    return Path(InferencePipeline.config_output_dir(output_root, weights, tracker_type, config_name, is_seg=is_seg))
 
 
 def find_g_proj(location_root: Path, loc: str) -> Path | None:
