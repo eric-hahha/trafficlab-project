@@ -253,6 +253,114 @@ class SatRenderer:
             painter.setPen(QPen(Qt.black))
             painter.drawText(box, Qt.AlignCenter, label)
 
+    # --- Parallax-correction pre/post overlay ---
+    # Mirrors trafficlab/diagnostics/parallax_correction_check.py's matplotlib
+    # plot_frame_pre_post_keypoints, rendered with QPainter so a whole video can
+    # be batch-exported instead of one matplotlib figure per frame. `records`
+    # is compute_frame_records(...)'s output: [{"tracked_id", "class", "pairs":
+    # {kp_idx: {"pre": (x,y), "post": (x,y)}}}, ...].
+    def render_parallax(self, records, scene_w: int, scene_h: int, *,
+                         frame_index: Optional[int] = None) -> QPixmap:
+        if (scene_w, scene_h) != self._img_size or self._img is None:
+            self._img = QImage(scene_w, scene_h, QImage.Format_ARGB32_Premultiplied)
+            self._img_size = (scene_w, scene_h)
+        self._img.fill(Qt.transparent)
+
+        painter = QPainter(self._img)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        pairs_flat = [
+            (record.get("tracked_id"), kp_idx, pair["pre"], pair["post"])
+            for record in records
+            for kp_idx, pair in record["pairs"].items()
+        ]
+
+        for _tid, kp_idx, pre, post in pairs_flat:
+            painter.setPen(QPen(_kp_part_color(_KEYPOINT_NAMES[kp_idx]), 1.2))
+            painter.drawLine(QPointF(*pre), QPointF(*post))
+
+        painter.setPen(QPen(Qt.white, 0.6))
+        painter.setBrush(QBrush(QColor(90, 90, 90)))
+        for _tid, _kp_idx, pre, _post in pairs_flat:
+            painter.drawEllipse(QPointF(*pre), 2.5, 2.5)
+
+        painter.setPen(QPen(Qt.white, 0.8))
+        for _tid, kp_idx, _pre, post in pairs_flat:
+            painter.setBrush(QBrush(_kp_part_color(_KEYPOINT_NAMES[kp_idx])))
+            painter.drawEllipse(QPointF(*post), _KP_MARKER_RADIUS, _KP_MARKER_RADIUS)
+
+        font = QFont()
+        font.setPointSizeF(_KP_LABEL_FONT_SIZE)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+
+        bounds = (0.0, 0.0, float(scene_w), float(scene_h))
+        occupied = [
+            (x - 2.5, y - 2.5, x + 2.5, y + 2.5) for _tid, _kp_idx, (x, y), _post in pairs_flat
+        ] + [
+            (x - _KP_MARKER_RADIUS, y - _KP_MARKER_RADIUS, x + _KP_MARKER_RADIUS, y + _KP_MARKER_RADIUS)
+            for _tid, _kp_idx, _pre, (x, y) in pairs_flat
+        ]
+
+        for tid, kp_idx, _pre, post in pairs_flat:
+            id_str = str(tid) if tid is not None else "?"
+            label = f"{id_str}-{_KEYPOINT_NAMES[kp_idx]}"
+            rect = metrics.boundingRect(label)
+            x, y = post
+            offset = self._place_kp_label(x, y, (rect.width(), rect.height()), occupied, bounds)
+            lx, ly = x + offset[0], y + offset[1]
+
+            painter.setPen(QPen(Qt.black, 0.6))
+            painter.drawLine(QPointF(x, y), QPointF(lx, ly))
+
+            pad = 2.0
+            box = QRectF(lx - rect.width() / 2.0 - pad, ly - rect.height() / 2.0 - pad,
+                         rect.width() + 2 * pad, rect.height() + 2 * pad)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 190)))
+            painter.drawRoundedRect(box, 2, 2)
+
+            painter.setPen(QPen(Qt.black))
+            painter.drawText(box, Qt.AlignCenter, label)
+
+        self._draw_parallax_legend(painter, records, len(pairs_flat), frame_index)
+
+        painter.end()
+        return QPixmap.fromImage(self._img)
+
+    @staticmethod
+    def _draw_parallax_legend(painter, records, n_keypoints, frame_index):
+        lines = []
+        if frame_index is not None:
+            lines.append(f"Frame: {frame_index}")
+        lines += [
+            f"Objects: {len(records)}",
+            f"Keypoints: {n_keypoints}",
+            "",
+            "Legend:",
+            "  colored dot + label: kp_sat, height-corrected",
+            "  gray dot (no label): apparent point at h=0 (before correction)",
+            "  line: correction displacement (color = car part, matches the dot)",
+        ]
+
+        font = QFont()
+        font.setPointSizeF(10.0)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        line_height = metrics.height() + 2.0
+        text_width = max(metrics.horizontalAdvance(line) for line in lines)
+
+        pad = 8.0
+        box = QRectF(10.0, 10.0, text_width + 2 * pad, line_height * len(lines) + 2 * pad)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 230)))
+        painter.drawRoundedRect(box, 4, 4)
+
+        painter.setPen(QPen(Qt.black))
+        for i, line in enumerate(lines):
+            baseline_y = box.top() + pad + metrics.ascent() + i * line_height
+            painter.drawText(QPointF(box.left() + pad, baseline_y), line)
+
     @staticmethod
     def _kp_label_box(x, y, offset, size):
         w, h = size
