@@ -109,7 +109,7 @@ Calibration Tab 用來產生 G Projection JSON 檔（詳見學術報告），在
 
 ![LocationTab](./media/readme-images/tL_location.png)
 
-**獨立校正工具：**Phase 3 的 parallax 參數（攝影機高度、位置、pixel-per-meter 比例）除了精靈裡手動用 2 位 subject 校正，也可以用兩個獨立工具求得——**消失點（vanishing-point）校正**工具，從畫面中點選的平行線加上一個已知高度的參考物，直接解出攝影機幾何；**參考點（reference-point）校正**工具，則是把同樣的手動校正方式從 2 個物件擴充到 N ≥ 2 個已知高度的參考物、可跨多個 frame 一起做最小平方擬合，得到更穩健的結果。這兩個工具是透過 `scripts/run_vp_calibration_tool.py` / `scripts/reference_point_calibration_tool.py` 啟動的獨立視窗，除非你明確套用結果，否則不會動到既有的 `G_projection_<code>.json`——目前還沒有整合進 Calibration Tab 精靈本身。
+**獨立校正工具：**Phase 3 的 parallax 參數（攝影機高度、位置、pixel-per-meter 比例）除了精靈裡手動用 2 位 subject 校正，也可以用獨立工具求得——**參考點（reference-point）校正**工具，把同樣的手動校正方式從 2 個物件擴充到 N ≥ 2 個已知高度的參考物、可跨多個 frame 一起做最小平方擬合，得到更穩健的結果，透過 `scripts/reference_point_calibration_tool.py` 啟動獨立視窗，除非你明確套用結果，否則不會動到既有的 `G_projection_<code>.json`——目前還沒有整合進 Calibration Tab 精靈本身。（另有一個**消失點（vanishing-point）校正**工具，從畫面中點選的平行線加上一個已知高度的參考物直接解出攝影機幾何；已 archive 到 `archive/run_vp_calibration_tool.py`，因為在 test21 實測時橫向／垂直方向線收斂不出來，詳見 [docs/height-correction-algorithm-survey.md](docs/height-correction-algorithm-survey.md)。）
 
 ### 定位／Inference Tab
 
