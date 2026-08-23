@@ -55,6 +55,17 @@ def default_smooth_output_path(input_path: str | Path) -> Path:
     return input_path.with_name(name + ".smoothed.json")
 
 
+def default_wheelpair_corrected_output_path(input_path: str | Path) -> Path:
+    """Build a default path next to the input with .wheelpair_corrected before the JSON suffix."""
+    input_path = Path(input_path)
+    name = input_path.name
+    if name.endswith(".json.gz"):
+        return input_path.with_name(name[:-8] + ".wheelpair_corrected.json.gz")
+    if name.endswith(".json"):
+        return input_path.with_name(name[:-5] + ".wheelpair_corrected.json")
+    return input_path.with_name(name + ".wheelpair_corrected.json")
+
+
 def infer_location_code(data: Any, input_path: str | Path | None = None) -> str | None:
     """Infer a TrafficLab location code from metadata or a conventional path."""
     if isinstance(data, dict):
