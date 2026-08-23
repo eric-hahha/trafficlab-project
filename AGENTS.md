@@ -153,6 +153,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | `--checkpoint` | `shufflenetv2k16-apollo-24` | PifPaf model |
 | `--spec-csv` | *(無)* | automobile-models-and-specs 的 `engines.csv`；找不到就退回 `prior_dimensions.json`，再找不到就用內建預設值 |
 | `--body-type` | `Sedan` | 與 `--spec-csv` 搭配使用 |
+| `--cad-template` | *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON（如 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`）；設定時直接套用這個模板，取代 `build_car_template(dims)`，`--spec-csv`/`--body-type` 與 `prior_dimensions.json` 都會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md` |
 | `--kp-conf` | `0.2` | 關鍵點信心度閾值 |
 | `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
 | `--start-frame` | `0` | 開始處理的第一幀；在此之前的幀會被讀取後丟棄，而不是用 seek |
@@ -252,11 +253,17 @@ QT_QPA_PLATFORM=offscreen python scripts/export_cctv_sat_composite.py \
 |------|---------|-------|
 | `--replay` | *(必填)* | replay `.json`/`.json.gz` 的路徑 |
 | `--out-dir` | *(必填)* | 逐幀 PNG 的輸出目錄 |
+| `--ids` | *(全部)* | 要納入的 `tracked_id` 值，以逗號分隔；某一幀若沒有符合的物件就整幀跳過 |
 | `--cctv-video` | replay 裡的 `mp4_path` | 覆寫影片路徑 |
 | `--sat-image` | `location/<code>/sat_<code>.png` | 覆寫 SAT 背景圖路徑 |
-| `--kp-conf` | `0.2` | 僅在缺少 `bbox_2d` 時，用來推導 2D box 的關鍵點信心度閾值 |
+| `--kp-conf` | `0.2` | 僅在缺少 `bbox_2d` 時，用來推導 2D box 的關鍵點信心度閾值；`--right-panel parallax` 時也用來判斷 `kp_cctv`/`kp_sat` 配對是否有效 |
 | `--sat-only` | 關閉 | 完全跳過 CCTV 面板與水平拼接 — 只輸出 SAT 疊圖，也因為不需要而跳過開啟影片檔 |
-| `--kp-color-mode` | `track` | `track` 依每輛車的 track 顏色來上色（預設，與 GUI 一致）；`part` 改為依車輛部位上色（wheel/light/plate/mirror/corner/low/up），同部位跨車輛使用相同顏色 |
+| `--right-panel` | `sat` | `sat`：現有 SAT 疊圖（box/arrow/coords dot/label/keypoints）；`parallax`：改畫 parallax-correction 前後對比 — 每個 `kp_sat`（彩色點+label，已校正）與其未校正的 h=0 apparent point（灰點）連線，逐幀比照 `trafficlab/diagnostics/parallax_correction_check.py` 的畫面。需要能解析出 G_projection config（見 `--g-proj`） |
+| `--g-proj` | `location/<code>/G_projection_<code>.json` | 僅 `--right-panel parallax` 使用；覆寫 G_projection config 路徑 |
+| `--kp-color-mode` | `track` | 僅 `--right-panel sat` 有效：`track` 依每輛車的 track 顏色來上色（預設，與 GUI 一致）；`part` 改為依車輛部位上色（wheel/light/plate/door/corner/bumper/glass），同部位跨車輛使用相同顏色。`--right-panel parallax` 一律依部位上色，不受此 flag 影響 |
+| `--no-sat-keypoints` | 關閉 | SAT 面板不畫關鍵點（box/arrow/coords dot/label 不受影響）；只能搭配 `--right-panel sat` |
+| `--zoom-to-ids` | 關閉 | 把 SAT 面板裁切成單一固定視窗，涵蓋 `--ids` 所指 track 在其出現過的每一幀裡的 `sat_coords`（`--right-panel parallax` 時則涵蓋校正前後兩組關鍵點），所有輸出幀共用同一視窗（畫面不跳動），取代顯示完整 SAT 影像；必須搭配 `--ids` |
+| `--zoom-margin` | `200` | `--zoom-to-ids` 裁切框周圍的 padding，單位為 SAT 影像像素（與 `trajectory_tools.py` 的 `--zoom-margin` 預設值一致） |
 
 輸出：`--out-dir` 裡每幀一張 `frame_<NNNN>.png`。要把這些幀轉成影片：
 
@@ -300,16 +307,6 @@ python scripts/run_keypoints_carfusion.py \
 
 在標準欄位之外，每個物件額外新增的欄位：`bbox_2d`、`bbox_cctv`、`kp_cctv`（原始 `[x, y, conf] × 14`）、`n_keypoints`、`status`（`ok` / `ambiguous_heading` / `failed_insufficient_kp`）、`have_heading`、`have_measurements`、`sat_floor_box`、`bbox_3d`。頂層欄位：`mp4_path`、`meta`、`location_code`、`mp4_frame_count`、`animation_frame_count`。
 
-要在不重新跑偵測／追蹤的情況下，把這些欄位回填到這個 schema 出現之前產生的 `detections.json`：
-
-```bash
-source /opt/anaconda3/bin/activate trafficlab && \
-python scripts/archive/patch_carfusion_replay_fields.py \
-  --json <detections_json_path> \
-  --video <video_path> \
-  --g-proj <g_proj_path>
-```
-
 ### 8. 軌跡繪圖
 
 涵蓋 `plot`（整條軌跡所有點畫一張圖）與 `frames`（對選定 id 用同一個固定裁切窗口逐幀輸出 PNG，適合接 ffmpeg 轉影片、畫面不跳動）：
@@ -323,7 +320,8 @@ source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools
 | `--location-code` / `--sat-image` | 兩者皆可 | replay 缺 `location_code` metadata 時擇一必填；否則預設找 `location/<location_code>/sat_<location_code>.png` |
 | `--ids` | 兩者皆可 | 篩選 `tracked_id`，逗號分隔 |
 | `--zoom-margin`（`plot` 需搭配 `--zoom-to-fit`） | 兩者皆可 | 預設 `200`，衛星影像像素；裁切窗口是對軌跡 bounding box 加 padding 算出來的，會視需要放大到跟原圖同比例避免 `imshow` 變形 |
-| `--show-heading-arrows` / `--show-keypoints`（`frames` 預設顯示，用 `--hide-heading-arrows`/`--hide-keypoints` 關閉） | 兩者皆可 | `--show-keypoints` 依部位（wheel/light/plate/mirror/corner/low/up）上色，跟「CCTV + SAT 合成輸出」`--kp-color-mode part` 同一套配色 |
+| `--show-heading-arrows` / `--show-keypoints`（`frames` 預設顯示，用 `--hide-heading-arrows`/`--hide-keypoints` 關閉） | 兩者皆可 | `--show-keypoints` 依部位（wheel/light/plate/door/corner/bumper/glass）上色，跟「CCTV + SAT 合成輸出」`--kp-color-mode part` 同一套配色 |
+| `--keypoint-trajectories` | 僅 `plot` | 逗號分隔的 `kp_sat` 關鍵點名稱（見 `trafficlab/motion/keypoints_openpifpaf.py` 的 `KP_NAMES`，連字號／底線皆可），把每個指定關鍵點畫成逐 track 連線軌跡，跟一般的 `sat_coords` 軌跡疊在同一張圖上，各關鍵點固定配色（跟 `--show-keypoints` 的部位配色是不同套） |
 | `--show-id-labels` | 僅 `plot` | 可見軌跡旁渲染同色 `tracked_id` 標籤 |
 | `--min-points` | 僅 `plot` | 預設跳過少於 5 點的 track |
 | `--include-out-of-bounds` | 僅 `plot` | 預設跳過完全在衛星影像外的 track |
