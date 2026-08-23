@@ -96,6 +96,17 @@ def mask_to_polygon(mask: np.ndarray) -> list | None:
     return [[float(x), float(y)] for x, y in contour[:, 0, :]]
 
 
+def mask_to_tight_bbox(mask: np.ndarray) -> tuple[float, float, float, float] | None:
+    """Axis-aligned bbox around a mask's largest contour (mask_to_polygon()'s
+    same largest-contour-by-area selection, reduced to its extents)."""
+    polygon = mask_to_polygon(mask)
+    if not polygon:
+        return None
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def polygon_contains_point(polygon, x: float, y: float) -> bool:
     """Point-in-polygon test — the file-loaded-record equivalent of indexing
     a dense mask array directly."""

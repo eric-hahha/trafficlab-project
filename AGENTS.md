@@ -114,7 +114,9 @@ source /opt/anaconda3/bin/activate trafficlab && PYTHONPATH=$(pwd) PYTORCH_ENABL
 - `--location <location_code>`：處理單一 location
 - `--mp4 <video_path>`：處理單一 mp4
 - 加 `--force`：即使輸出已存在也強制重跑
-- `<config_name>`：YAML（預設 `infr_cfg_test.yaml`，可用 `--config-path` 換）裡定義的 config key，不填則用檔案裡第一個 config
+- `<config_name>`：YAML（預設 `inference_config.yaml`，可用 `--config-path` 換）裡定義的 config key，不填則用檔案裡第一個 config
+
+Config 的 `model` 區塊預設是偵測模型（regression box 直接拿去投影）。設定 `model.type: "seg"` 可以改用 segmentation checkpoint（如 `models/yolo11m-seg.pt`）：box 來源改成從分割 mask 的最大 contour 算出的 tight box，其餘流程（追蹤、投影、kinematics）不變。seg 模式下 `model.classes` 為必填，是 COCO 類別名稱 → 專案內部類別名稱的對照表（例如 `{car: car, motorcycle: two_wheeler}`）；分割模型偵測到的每個物件都會算 tight box，但只有在這張表裡的類別會被定位、寫進輸出，其餘（如 `person`）算完 box 後就跳過。seg 模式的輸出固定寫到 `output/yolobox-seg/model-<model_name>_<tracker_type>/<config_name>/<location_code>/`，忽略一般模式用的 `output/` 輸出根目錄。
 
 ### 3. 後處理（Postprocess）
 

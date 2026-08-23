@@ -9,10 +9,13 @@ from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
+from trafficlab.motion.segmentation_car import mask_to_tight_bbox
 from trafficlab.io.replay_writer import ReplayWriter
 
 
 class InferencePipeline:
+
+    SEG_OUTPUT_ROOT = "output/yolobox-seg"
 
     def __init__(
         self,
@@ -37,9 +40,10 @@ class InferencePipeline:
         self.stop_flag_fn = stop_flag_fn or (lambda: False)
 
     @staticmethod
-    def config_output_dir(output_root, weights, tracker_type, config_name):
+    def config_output_dir(output_root, weights, tracker_type, config_name, is_seg=False):
         model_name = Path(weights).stem
-        return os.path.join(output_root, f"model-{model_name}_{tracker_type}", config_name)
+        root = InferencePipeline.SEG_OUTPUT_ROOT if is_seg else output_root
+        return os.path.join(root, f"model-{model_name}_{tracker_type}", config_name)
 
     def _build_tracker_config(self, tracking_cfg, output_dir):
         tracker_type = (tracking_cfg or {}).get('tracker_type', 'bytetrack')
@@ -103,6 +107,14 @@ class InferencePipeline:
         prior_dims = all_priors.get(measure_set, {})
         prior_dims_norm = {k.strip().lower(): v for k, v in prior_dims.items()}
 
+        # Segmentation-based tight-box localization (model.type: seg)
+        seg_class_map = full_config['model'].get('classes')
+        is_seg = full_config['model'].get('type') == 'seg'
+        if is_seg and not seg_class_map:
+            raise ValueError(
+                "model.type is 'seg' but model.classes (COCO name -> internal class name map) is missing in config"
+            )
+
         # Output Setup
         footage_name = os.path.basename(self.footage_path)
         # use chosen config_name for folder naming (already set above)
@@ -110,7 +122,9 @@ class InferencePipeline:
         tracking_cfg = full_config.get('tracking', {})
         tracker_type = tracking_cfg.get('tracker_type', 'default')
 
-        config_dir = InferencePipeline.config_output_dir(self.output_root, full_config['model']['weights'], tracker_type, config_name)
+        config_dir = InferencePipeline.config_output_dir(
+            self.output_root, full_config['model']['weights'], tracker_type, config_name, is_seg=is_seg
+        )
         os.makedirs(config_dir, exist_ok=True)
         out_subdir = os.path.join(config_dir, self.loc_code)
         os.makedirs(out_subdir, exist_ok=True)
@@ -183,6 +197,10 @@ class InferencePipeline:
         }
         if tracker_cfg_path is not None:
             track_kwargs["tracker"] = tracker_cfg_path
+        if is_seg:
+            # Aligns r.masks.data to orig_shape (letterbox-unaware resize otherwise
+            # misaligns mask pixels against the box/ROI pipeline's frame coordinates).
+            track_kwargs["retina_masks"] = True
 
         # Optional diagnostic pass: log all raw detections at low conf for comparison.
         # Enable via `debug: {conf_log: true}` in the inference config. Off by default.
@@ -243,8 +261,26 @@ class InferencePipeline:
             cls_ids = r.boxes.cls.cpu().numpy()
             confs = r.boxes.conf.cpu().numpy()
             track_ids = r.boxes.id.cpu().numpy() if r.boxes.id is not None else [None]*len(boxes)
+            masks_data = r.masks.data.cpu().numpy() if (is_seg and r.masks is not None) else None
 
             for j, box in enumerate(boxes):
+                cls_name = r.names[int(cls_ids[j])]
+
+                if is_seg:
+                    if masks_data is not None and j < len(masks_data):
+                        tight = mask_to_tight_bbox(masks_data[j].astype(bool))
+                        if tight is not None:
+                            box = np.array(tight, dtype=box.dtype)
+                        else:
+                            self.log_fn(f"frame={i}: empty seg mask for detection {j} (class={cls_name}), falling back to detector box")
+                    else:
+                        self.log_fn(f"frame={i}: no seg mask returned for detection {j} (class={cls_name}), falling back to detector box")
+
+                    internal_name = seg_class_map.get(cls_name)
+                    if internal_name is None:
+                        continue
+                    cls_name = internal_name
+
                 # 1. ROI Check
                 if roi_mask is not None:
                     x1, y1, x2, y2 = map(int, box)
@@ -259,7 +295,6 @@ class InferencePipeline:
                         if np.count_nonzero(roi_mask[y1:y2, x1:x2]) == 0: continue
 
                 # 2. Projection
-                cls_name = r.names[int(cls_ids[j])]
                 if _conf_tracked is not None:
                     _conf_tracked.info(f"frame={i} tid={int(track_ids[j]) if track_ids[j] is not None else None} cls={cls_name} conf={float(confs[j]):.4f}")
                 dims = prior_dims_norm.get(cls_name.strip().lower())

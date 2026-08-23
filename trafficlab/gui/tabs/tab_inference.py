@@ -359,7 +359,8 @@ class InferenceTab(QWidget):
         from trafficlab.inference.pipeline import InferencePipeline
         weights = current_cfg.get('model', {}).get('weights', 'Unknown')
         tracker_type = current_cfg.get('tracking', {}).get('tracker_type', 'default')
-        base_out = InferencePipeline.config_output_dir(self.root_out_dir, weights, tracker_type, config_name)
+        is_seg = current_cfg.get('model', {}).get('type') == 'seg'
+        base_out = InferencePipeline.config_output_dir(self.root_out_dir, weights, tracker_type, config_name, is_seg=is_seg)
         
         # --- DIRTY CONFIG CHECK ---
         frozen_cfg_path = os.path.join(base_out, f"{config_name}.yaml")
@@ -482,7 +483,8 @@ class InferenceTab(QWidget):
         from trafficlab.inference.pipeline import InferencePipeline
         weights = cfg.get('model', {}).get('weights', 'Unknown')
         tracker = cfg.get('tracking', {}).get('tracker_type', 'default')
-        target_dir = InferencePipeline.config_output_dir(self.root_out_dir, weights, tracker, cname)
+        is_seg = cfg.get('model', {}).get('type') == 'seg'
+        target_dir = InferencePipeline.config_output_dir(self.root_out_dir, weights, tracker, cname, is_seg=is_seg)
         
         if not os.path.exists(target_dir):
             QMessageBox.information(self, "Info", "Nothing to wipe.")
