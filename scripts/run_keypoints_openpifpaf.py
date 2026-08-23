@@ -50,6 +50,7 @@ from trafficlab.motion.keypoints_openpifpaf import (
     build_car_template,
     compute_car_dims_from_spec_csv,
     _FALLBACK_DIMS,
+    KP_NAMES,
 )
 from trafficlab.io.replay_writer import ReplayWriter
 
@@ -251,6 +252,13 @@ def main():
     parser.add_argument('--spec-csv',   default=None,
                         help='engines.csv from ilyasozkurt/automobile-models-and-specs')
     parser.add_argument('--body-type',  default='Sedan')
+    parser.add_argument('--cad-template', default=None,
+                        help='Path to a per-model keypoint template JSON from '
+                             'scripts/build_cad_keypoint_template.py (e.g. '
+                             'cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json). '
+                             'When set, this exact 24-keypoint template is used directly instead of '
+                             'build_car_template(dims) — --spec-csv/--body-type and '
+                             'prior_dimensions.json are ignored.')
     parser.add_argument('--kp-conf',    type=float, default=0.2)
     parser.add_argument('--frames',          type=int,   default=-1,  help='-1 = all')
     parser.add_argument('--pifpaf-threshold', type=float, default=0.01,
@@ -337,27 +345,51 @@ def main():
     location_code = _infer_location_code(args.g_proj)
 
     # --- Dimensions & template ---
-    if args.spec_csv:
-        dims = compute_car_dims_from_spec_csv(args.spec_csv, body_type=args.body_type)
+    if args.cad_template:
+        with open(args.cad_template) as f:
+            cad_data = json.load(f)
+        if cad_data.get('kp_names') != list(KP_NAMES):
+            raise ValueError(
+                f"--cad-template {args.cad_template!r} was built against a different "
+                "KP_NAMES ordering than the current trafficlab.motion.keypoints_openpifpaf "
+                "— regenerate it with scripts/build_cad_keypoint_template.py."
+            )
+        template = np.array(cad_data['template'], dtype=np.float64)
+        if template.shape != (24, 3):
+            raise ValueError(f"--cad-template {args.cad_template!r} has template shape "
+                              f"{template.shape}, expected (24, 3)")
+        cad_model = cad_data.get('source', {}).get('cad_model', '?')
+        print(f'[haware] Using CAD-derived template: {args.cad_template} (cad_model={cad_model})')
+        # _sat_floor_box (sat_floor_box output field) needs a length/width
+        # footprint regardless of template source -- derive it from the CAD
+        # template's own x/z extents (build_car_template's dims-driven
+        # template uses the same half-length/half-width convention).
+        dims = {
+            'length': float(template[:, 2].max() - template[:, 2].min()),
+            'width': float(template[:, 0].max() - template[:, 0].min()),
+        }
     else:
-        d = g_proj_dir
-        dims_path = None
-        for _ in range(5):
-            candidate = os.path.join(d, 'prior_dimensions.json')
-            if os.path.exists(candidate):
-                dims_path = candidate
-                break
-            d = os.path.dirname(d)
-        if dims_path:
-            with open(dims_path) as f:
-                pj = json.load(f)
-            dims = pj.get('measurements_visdrone', {}).get('car', dict(_FALLBACK_DIMS))
-            print(f'[haware] Using prior_dimensions.json: {dims}')
+        if args.spec_csv:
+            dims = compute_car_dims_from_spec_csv(args.spec_csv, body_type=args.body_type)
         else:
-            dims = dict(_FALLBACK_DIMS)
-            print(f'[haware] Using built-in fallback dims: {dims}')
+            d = g_proj_dir
+            dims_path = None
+            for _ in range(5):
+                candidate = os.path.join(d, 'prior_dimensions.json')
+                if os.path.exists(candidate):
+                    dims_path = candidate
+                    break
+                d = os.path.dirname(d)
+            if dims_path:
+                with open(dims_path) as f:
+                    pj = json.load(f)
+                dims = pj.get('measurements_visdrone', {}).get('car', dict(_FALLBACK_DIMS))
+                print(f'[haware] Using prior_dimensions.json: {dims}')
+            else:
+                dims = dict(_FALLBACK_DIMS)
+                print(f'[haware] Using built-in fallback dims: {dims}')
 
-    template = build_car_template(dims)
+        template = build_car_template(dims)
     localizer = OpenPifPafKeypointsLocalizer(g_engine, template, kp_conf=args.kp_conf)
     px_m = g_engine.px_per_m
 
