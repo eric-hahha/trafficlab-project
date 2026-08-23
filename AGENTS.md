@@ -366,6 +366,52 @@ flag 是 `smooth` 與上一節「軌跡繪圖」`plot` 的合集，繪圖相關 
 source /opt/anaconda3/bin/activate trafficlab && python -m py_compile scripts/run_inference.py
 ```
 
+### 11. 車輛模板 GCP 校正工具
+
+獨立的 GUI 工具，把「方向 4：車輛模板作為 PnP GCP」跟「方向 7：多參考物最小二乘法」接在一起：在 CCTV 畫面上點 2 個輪胎接地點，工具用既有 ground homography 把車輛 CAD 模板（24 個關鍵點）套上正確的 sat 位置、朝向與大小，再跟該幀 replay JSON 的 `kp_cctv` 配對，產生多組「頭點像素＋腳點真實位置＋真實高度」參考點，餵給跟方向 7 完全共用的 `trafficlab.projection.reference_point_calibration.calibrate()` 解出 `cam_sat_xy`/`z_cam_meters`。完整使用步驟（5 個分頁）、設計細節與常見問題見 `docs/car-template-calibration-tool-guide.md`。
+
+```bash
+source /opt/anaconda3/bin/activate trafficlab
+python scripts/car_template_calibration_tool.py \
+  --replay-json <replay_json_path> \
+  --g-proj <g_proj_path>
+```
+
+不帶參數執行會用預設值（`output/wheel_pair/test21/test21-4.json.gz` 與 `location/test21/G_projection_test21.json`，若存在）。
+
+| Flag | 說明 |
+|------|------|
+| `--replay-json` | 已跑過 `run_keypoints_openpifpaf.py`、帶 `kp_cctv` 欄位的 replay JSON；`location_code`／對應影片路徑會自動推斷，不用另外指定影片 |
+| `--g-proj` | 既有 `G_projection_<code>.json`，若給了優先於 `--location-code` |
+| `--location-code` | `--g-proj` 的替代寫法，自動找 `location/<code>/G_projection_<code>.json` |
+
+一定要有既有的 `G_projection_<code>.json` 才能運作；預設不會覆寫它，結果另存到 `output/car_template_calibration/<location_code>/`，需要在「結果」tab 另外按「套用到 G_projection」才會覆寫（無法復原）。
+
+核心程式碼：`trafficlab/projection/car_template_placement.py`（模板數學，純 numpy）、`trafficlab/gui/tools/car_template_calibration_tool.py`（GUI 本體）；共用 `trafficlab/projection/reference_point_calibration.py` 的 `calibrate()`，以及「5. 驗證」tab 用到的 `trafficlab/diagnostics/parallax_correction_check.py`。
+
+### 12. 多參考物最小二乘校正工具
+
+獨立的 GUI 工具，實作方向 7（多參考物最小二乘法）：蒐集 N 個（N ≥ 2）已知真實高度的參考物件的頭／腳像素座標，套用非線性最小二乘同時解出相機的 sat 平面位置（`cam_sat_xy`）與高度（`z_cam_meters`）——是現有 `pars_stage.py` 兩物件手動標定法的推廣，參考物件數量從固定 2 個放寬到任意多個，數學模型相同。完整使用步驟（4 個分頁）與常見問題見 `docs/reference-point-calibration-tool-guide.md`。
+
+```bash
+source /opt/anaconda3/bin/activate trafficlab
+python scripts/reference_point_calibration_tool.py \
+  --video <video_path> \
+  --g-proj <g_proj_path>
+```
+
+不帶參數執行會用預設值（`location/test21/footage/test21-4.mp4` 與 `location/test21/G_projection_test21.json`）。
+
+| Flag | 說明 |
+|------|------|
+| `--video` | 開啟時直接載入這支影片，預設 `location/test21/footage/test21-4.mp4` |
+| `--g-proj` | 既有 `G_projection_<code>.json`（提供 undistort + homography），若給了優先於 `--location-code` |
+| `--location-code` | `--g-proj` 的替代寫法，自動找 `location/<code>/G_projection_<code>.json`，預設 `test21` |
+
+一定要有既有的 `G_projection_<code>.json` 才能運作；預設不會覆寫它，結果另存到 `output/reference_point_calibration/<location_code>/`，需要在「結果」tab 另外按「套用到 G_projection」才會覆寫（無法復原）。
+
+核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/diagnostics/parallax_correction_check.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
+
 ## 推論相關注意事項
 
 - GUI 的 inference 分頁與 `scripts/run_inference.py` 都使用 `trafficlab.inference.pipeline.InferencePipeline`。
