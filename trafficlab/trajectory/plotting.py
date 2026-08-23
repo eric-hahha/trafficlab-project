@@ -626,7 +626,14 @@ class TrajectoryPlotter:
             ax.set_ylim(self.satellite_image.height, 0)
 
         if show_id_labels:
-            occupied_label_boxes = []
+            # Seed with every plotted point's marker footprint (not just the
+            # label anchor points) so placement search steers labels off the
+            # dense trail of dots, not just away from other labels.
+            occupied_label_boxes = [
+                self._marker_box(ax, point, marker_size / 2.0 + 2.0)
+                for points in trajectories.values()
+                for point in points
+            ]
             for track_id, label_point, color in label_requests:
                 self._draw_id_label(ax, track_id, label_point, color, occupied_label_boxes)
 
