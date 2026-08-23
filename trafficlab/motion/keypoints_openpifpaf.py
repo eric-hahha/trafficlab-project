@@ -116,7 +116,7 @@ def build_car_template(dims: dict) -> np.ndarray:
 
     Keypoint height confidence:
       HIGH (measured): wheels (h=0), roof (h=dims.height)
-      ESTIMATED: bumpers, lights, mirrors, plate
+      ESTIMATED: bumpers, lights, door-top corners, plate
     """
     L  = dims['length']
     W  = dims['width']
@@ -133,74 +133,77 @@ def build_car_template(dims: dict) -> np.ndarray:
     H_BUMPER = 0.20   # front / rear bumper bottom
     H_CORNER = 0.50   # rear corners, rear plate
     H_LAMP   = 0.65   # head / tail lights
-    H_MIRROR = 1.05   # side mirrors (sticks above door line)
-    H_ROOF   = 1.65   # roof-line keypoints (front/central/rear up) — fixed,
+    H_DOOR_BASE = 1.05  # front door base, near A-pillar / mirror mount
+                       # (was named "mirror_edge" pre-rename — it does not
+                       # track the physical side mirror, see front_door_base
+                       # below)
+    H_ROOF   = 1.65   # roof-line keypoints (front/rear glass-top) — fixed,
                        # not tied to dims.height (roof peak sits higher than
                        # the vehicle's overall body-height spec for most sedans)
 
     t = np.zeros((24, 3), dtype=np.float64)
 
     # ---- front upper area (roof front edge) ----
-    t[0]  = [-hw * 0.70, H_ROOF,   -hl * 0.55]   # front_up_right
-    t[1]  = [ hw * 0.70, H_ROOF,   -hl * 0.55]   # front_up_left
+    t[0]  = [-hw * 0.70, H_ROOF,   -hl * 0.55]   # front_glass_top_right
+    t[1]  = [ hw * 0.70, H_ROOF,   -hl * 0.55]   # front_glass_top_left
 
     # ---- headlights (middle height, front face) ----
     t[2]  = [-hw * 0.85, H_LAMP,   -hl]           # front_light_right
     t[3]  = [ hw * 0.85, H_LAMP,   -hl]           # front_light_left
 
-    # ---- front bumper bottom ----
-    t[4]  = [-hw,        H_BUMPER, -hl]            # front_low_right
-    t[5]  = [ hw,        H_BUMPER, -hl]            # front_low_left
+    # ---- front fog light (bumper-area) ----
+    t[4]  = [-hw,        H_BUMPER, -hl]            # front_low_fog_light_right
+    t[5]  = [ hw,        H_BUMPER, -hl]            # front_low_fog_light_left
 
-    # ---- roof centre ----
-    t[6]  = [ hw * 0.85, H_ROOF,    0.0]           # central_up_left
+    # ---- front door top (window trailing edge, near B-pillar) ----
+    t[6]  = [ hw * 0.85, H_ROOF,    0.0]           # front_door_top_left
 
     # ---- wheels (real measured positions, h = 0) ----
-    t[7]  = [ htw,       0.0,      -hwb]           # front_wheel_left
-    t[8]  = [ htw,       0.0,       hwb]           # rear_wheel_left
+    t[7]  = [ htw,       0.0,      -hwb]           # front_wheel_center_left
+    t[8]  = [ htw,       0.0,       hwb]           # rear_wheel_center_left
 
     # ---- rear corners / rear area ----
     t[9]  = [ hw,        H_CORNER,  hl * 0.65]    # rear_corner_left
-    t[10] = [ hw * 0.70, H_ROOF,    hl * 0.40]    # rear_up_left
-    t[11] = [-hw * 0.70, H_ROOF,    hl * 0.40]    # rear_up_right
+    t[10] = [ hw * 0.70, H_ROOF,    hl * 0.40]    # rear_glass_up_left
+    t[11] = [-hw * 0.70, H_ROOF,    hl * 0.40]    # rear_glass_up_right
     t[12] = [ hw * 0.85, H_LAMP,    hl]            # rear_light_left
     t[13] = [-hw * 0.85, H_LAMP,    hl]            # rear_light_right
-    t[14] = [ hw,        H_BUMPER,  hl]            # rear_low_left
-    t[15] = [-hw,        H_BUMPER,  hl]            # rear_low_right
+    t[14] = [ hw,        H_BUMPER,  hl]            # rear_bumper_left
+    t[15] = [-hw,        H_BUMPER,  hl]            # rear_bumper_right
 
-    # ---- roof centre right ----
-    t[16] = [-hw * 0.85, H_ROOF,    0.0]           # central_up_right
+    # ---- front door top (window trailing edge, near B-pillar) ----
+    t[16] = [-hw * 0.85, H_ROOF,    0.0]           # front_door_top_right
     t[17] = [-hw,        H_CORNER,  hl * 0.65]    # rear_corner_right
 
     # ---- wheels (real) ----
-    t[18] = [-htw,       0.0,       hwb]           # rear_wheel_right
-    t[19] = [-htw,       0.0,      -hwb]           # front_wheel_right
+    t[18] = [-htw,       0.0,       hwb]           # rear_wheel_center_right
+    t[19] = [-htw,       0.0,      -hwb]           # front_wheel_center_right
 
     # ---- rear licence plate ----
     t[20] = [ hw * 0.15, H_CORNER,  hl]            # rear_plate_left
     t[21] = [-hw * 0.15, H_CORNER,  hl]            # rear_plate_right
 
-    # ---- side mirrors (stick out beyond body width) ----
-    t[22] = [ hw * 1.05, H_MIRROR, -hl * 0.30]    # mirror_edge_left
-    t[23] = [-hw * 1.05, H_MIRROR, -hl * 0.30]    # mirror_edge_right
+    # ---- front door base (near A-pillar, close to mirror mount) ----
+    t[22] = [ hw * 1.05, H_DOOR_BASE, -hl * 0.30]    # front_door_base_left
+    t[23] = [-hw * 1.05, H_DOOR_BASE, -hl * 0.30]    # front_door_base_right
 
     return t
 
 
 # Apollo-24 keypoint names, indexed to match build_car_template's rows.
 KP_NAMES = [
-    'front_up_right',    'front_up_left',
-    'front_light_right', 'front_light_left',
-    'front_low_right',   'front_low_left',
-    'central_up_left',
-    'front_wheel_left',  'rear_wheel_left',
-    'rear_corner_left',  'rear_up_left',      'rear_up_right',
+    'front_glass_top_right',    'front_glass_top_left',
+    'front_light_right',        'front_light_left',
+    'front_low_fog_light_right', 'front_low_fog_light_left',
+    'front_door_top_left',
+    'front_wheel_center_left',  'rear_wheel_center_left',
+    'rear_corner_left',  'rear_glass_up_left',      'rear_glass_up_right',
     'rear_light_left',   'rear_light_right',
-    'rear_low_left',     'rear_low_right',
-    'central_up_right',  'rear_corner_right',
-    'rear_wheel_right',  'front_wheel_right',
+    'rear_bumper_left',  'rear_bumper_right',
+    'front_door_top_right',     'rear_corner_right',
+    'rear_wheel_center_right',  'front_wheel_center_right',
     'rear_plate_left',   'rear_plate_right',
-    'mirror_edge_left',  'mirror_edge_right',
+    'front_door_base_left',     'front_door_base_right',
 ]
 
 
@@ -212,31 +215,32 @@ KP_NAMES = [
 # Left-right symmetric pairs: same template z (and y), mirrored x. Every one
 # of the 24 keypoints belongs to exactly one such pair.
 _LR_PAIRS = [
-    (0, 1),    # front_up_right     / front_up_left
-    (2, 3),    # front_light_right  / front_light_left
-    (4, 5),    # front_low_right    / front_low_left
-    (6, 16),   # central_up_left    / central_up_right
-    (7, 19),   # front_wheel_left   / front_wheel_right
-    (8, 18),   # rear_wheel_left    / rear_wheel_right
-    (9, 17),   # rear_corner_left   / rear_corner_right
-    (10, 11),  # rear_up_left       / rear_up_right
-    (12, 13),  # rear_light_left    / rear_light_right
-    (14, 15),  # rear_low_left      / rear_low_right
-    (20, 21),  # rear_plate_left    / rear_plate_right
-    (22, 23),  # mirror_edge_left   / mirror_edge_right
+    (0, 1),    # front_glass_top_right / front_glass_top_left
+    (2, 3),    # front_light_right     / front_light_left
+    (4, 5),    # front_low_fog_light_right / front_low_fog_light_left
+    (6, 16),   # front_door_top_left   / front_door_top_right
+    (7, 19),   # front_wheel_center_left / front_wheel_center_right
+    (8, 18),   # rear_wheel_center_left  / rear_wheel_center_right
+    (9, 17),   # rear_corner_left       / rear_corner_right
+    (10, 11),  # rear_glass_up_left     / rear_glass_up_right
+    (12, 13),  # rear_light_left        / rear_light_right
+    (14, 15),  # rear_bumper_left       / rear_bumper_right
+    (20, 21),  # rear_plate_left        / rear_plate_right
+    (22, 23),  # front_door_base_left   / front_door_base_right
 ]
 
 # Same-side front/rear wheel pairs: only these two are symmetric about the
 # vehicle's mid-wheelbase (z sums to 0), so their connecting-line midpoint
 # falls exactly on the true lateral centerline. (front_idx, rear_idx).
 _FR_WHEEL_PAIRS = [
-    (7, 8),    # front_wheel_left  / rear_wheel_left
-    (19, 18),  # front_wheel_right / rear_wheel_right
+    (7, 8),    # front_wheel_center_left  / rear_wheel_center_left
+    (19, 18),  # front_wheel_center_right / rear_wheel_center_right
 ]
 
 # Excluded from Method 2's "assumed centerline" position averaging (not from
-# the heading consistency vote below) — lights, mirrors and rear corners sit
-# at extremities and are judged less reliable position-wise for this average.
+# the heading consistency vote below) — lights, door-top corners and rear
+# corners sit at extremities and are judged less reliable position-wise for
+# this average.
 _EXCLUDE_FROM_MIDPOINT = frozenset([2, 3, 12, 13, 22, 23, 9, 17])
 
 

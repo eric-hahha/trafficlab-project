@@ -13,12 +13,12 @@ import openpifpaf.plugins.apollocar3d as apc
 apc.register()
 
 KEYPOINT_NAMES = [
-    'front_up_right', 'front_up_left', 'front_light_right', 'front_light_left',
-    'front_low_right', 'front_low_left', 'central_up_left', 'front_wheel_left',
-    'rear_wheel_left', 'rear_corner_left', 'rear_up_left', 'rear_up_right',
-    'rear_light_left', 'rear_light_right', 'rear_low_left', 'rear_low_right',
-    'central_up_right', 'rear_corner_right', 'rear_wheel_right', 'front_wheel_right',
-    'rear_plate_left', 'rear_plate_right', 'mirror_edge_left', 'mirror_edge_right',
+    'front_glass_top_right', 'front_glass_top_left', 'front_light_right', 'front_light_left',
+    'front_low_fog_light_right', 'front_low_fog_light_left', 'front_door_top_left', 'front_wheel_center_left',
+    'rear_wheel_center_left', 'rear_corner_left', 'rear_glass_up_left', 'rear_glass_up_right',
+    'rear_light_left', 'rear_light_right', 'rear_bumper_left', 'rear_bumper_right',
+    'front_door_top_right', 'rear_corner_right', 'rear_wheel_center_right', 'front_wheel_center_right',
+    'rear_plate_left', 'rear_plate_right', 'front_door_base_left', 'front_door_base_right',
 ]
 
 # left-right horizontal pairs (same as Vehicle_Orientation_Detect utils.py)
@@ -30,13 +30,13 @@ HORIZONTAL_PAIRS = [
 COLORS = {
     'wheel': (0, 255, 0),
     'light': (0, 180, 255),
-    'mirror': (255, 0, 200),
+    'door_top': (255, 0, 200),
     'other': (180, 180, 180),
 }
 
 WHEEL_IDX = {7, 8, 18, 19}
 LIGHT_IDX = {2, 3, 12, 13}
-MIRROR_IDX = {22, 23}
+DOOR_TOP_IDX = {22, 23}
 
 
 def kp_color(idx):
@@ -44,8 +44,8 @@ def kp_color(idx):
         return COLORS['wheel']
     if idx in LIGHT_IDX:
         return COLORS['light']
-    if idx in MIRROR_IDX:
-        return COLORS['mirror']
+    if idx in DOOR_TOP_IDX:
+        return COLORS['door_top']
     return COLORS['other']
 
 

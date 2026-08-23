@@ -11,12 +11,12 @@ from trafficlab.visualization.cctv_renderer import get_color_from_string
 # scripts/plot_reprojection_keypoints.py, and the p_sat / kp_sat index used by
 # trafficlab/motion/keypoints_openpifpaf.py).
 _KEYPOINT_NAMES = [
-    'front_up_right', 'front_up_left', 'front_light_right', 'front_light_left',
-    'front_low_right', 'front_low_left', 'central_up_left', 'front_wheel_left',
-    'rear_wheel_left', 'rear_corner_left', 'rear_up_left', 'rear_up_right',
-    'rear_light_left', 'rear_light_right', 'rear_low_left', 'rear_low_right',
-    'central_up_right', 'rear_corner_right', 'rear_wheel_right', 'front_wheel_right',
-    'rear_plate_left', 'rear_plate_right', 'mirror_edge_left', 'mirror_edge_right',
+    'front_glass_top_right', 'front_glass_top_left', 'front_light_right', 'front_light_left',
+    'front_low_fog_light_right', 'front_low_fog_light_left', 'front_door_top_left', 'front_wheel_center_left',
+    'rear_wheel_center_left', 'rear_corner_left', 'rear_glass_up_left', 'rear_glass_up_right',
+    'rear_light_left', 'rear_light_right', 'rear_bumper_left', 'rear_bumper_right',
+    'front_door_top_right', 'rear_corner_right', 'rear_wheel_center_right', 'front_wheel_center_right',
+    'rear_plate_left', 'rear_plate_right', 'front_door_base_left', 'front_door_base_right',
 ]
 _KP_LABEL_OFFSETS = [
     (dx * radius, dy * radius)
@@ -26,17 +26,20 @@ _KP_LABEL_OFFSETS = [
 _KP_MARKER_RADIUS = 3.0
 _KP_LABEL_FONT_SIZE = 6.0
 
-# Keypoint-name substring -> car part, checked in this order (first match wins;
-# 'up' must come after the more specific parts since e.g. 'front_up_right' has
-# no other matching substring). Colors chosen for max hue separation.
+# Keypoint-name substring -> car part, checked in this order (first match
+# wins). Every name in _KEYPOINT_NAMES matches exactly one of these, so order
+# only matters for names carrying more than one substring (e.g.
+# 'front_low_fog_light_*' matches both 'light' and 'bumper' — 'light' wins
+# since it's the more specific/accurate part). Colors chosen for max hue
+# separation.
 _KP_PART_COLORS = [
     ('wheel',  QColor(34, 197, 94)),    # green
     ('light',  QColor(249, 115, 22)),   # orange
     ('plate',  QColor(234, 179, 8)),    # yellow
-    ('mirror', QColor(34, 211, 238)),   # cyan
+    ('door',   QColor(34, 211, 238)),   # cyan — front-door top corners (was 'mirror')
     ('corner', QColor(236, 72, 153)),   # pink
-    ('low',    QColor(168, 85, 247)),   # purple
-    ('up',     QColor(59, 130, 246)),   # blue
+    ('bumper', QColor(168, 85, 247)),   # purple (was 'low')
+    ('glass',  QColor(59, 130, 246)),   # blue — roof/glass-top corners (was 'up')
 ]
 
 

@@ -39,15 +39,17 @@ from trafficlab.trajectory.io import (
 # keypoint's color means the same thing whether it's rendered by the Qt GUI
 # renderer or this matplotlib plotter. Not shared code because the two
 # renderers intentionally don't depend on each other's backend (Qt vs
-# matplotlib).
+# matplotlib). Every name in KP_NAMES matches exactly one of these; order
+# only matters for 'front_low_fog_light_*', which carries both 'light' and
+# 'bumper' — 'light' wins as the more specific/accurate part.
 _KP_PART_COLORS = [
     ('wheel',  (34 / 255, 197 / 255, 94 / 255)),
     ('light',  (249 / 255, 115 / 255, 22 / 255)),
     ('plate',  (234 / 255, 179 / 255, 8 / 255)),
-    ('mirror', (34 / 255, 211 / 255, 238 / 255)),
+    ('door',   (34 / 255, 211 / 255, 238 / 255)),   # front-door top corners (was 'mirror')
     ('corner', (236 / 255, 72 / 255, 153 / 255)),
-    ('low',    (168 / 255, 85 / 255, 247 / 255)),
-    ('up',     (59 / 255, 130 / 255, 246 / 255)),
+    ('bumper', (168 / 255, 85 / 255, 247 / 255)),   # was 'low'
+    ('glass',  (59 / 255, 130 / 255, 246 / 255)),   # roof/glass-top corners (was 'up')
 ]
 
 
