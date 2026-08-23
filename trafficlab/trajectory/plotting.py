@@ -60,6 +60,16 @@ def _kp_part_color(kp_name: str) -> tuple[float, float, float]:
     return (0.78, 0.78, 0.78)  # unmatched name, shouldn't happen
 
 
+# Distinct per-keypoint (not per-part) palette for --keypoint-trajectories,
+# where the whole point is telling individual named keypoints apart even
+# when they share a _KP_PART_COLORS bucket (e.g. front_door_top_left and
+# front_door_base_left are both 'door').
+_KP_TRAJECTORY_COLORS = [
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231",
+    "#911eb4", "#46f0f0", "#f032e6", "#bcf60c",
+]
+
+
 class TrajectoryPlotter:
     """Plot TrafficLab trajectory points over a location satellite image."""
 
@@ -183,6 +193,40 @@ class TrajectoryPlotter:
                     )
 
         return keypoints
+
+    def extract_keypoint_trajectory(
+        self,
+        kp_name: str,
+        *,
+        track_ids: Iterable[int] | None = None,
+    ) -> dict[int, list[tuple[float, float]]]:
+        """Per-track (x, y) path for a single named kp_sat keypoint, in frame order."""
+        normalized = kp_name.replace("-", "_")
+        if normalized not in KP_NAMES:
+            raise ValueError(
+                f"Unknown keypoint name {kp_name!r}. Valid names: {', '.join(KP_NAMES)}"
+            )
+        kp_idx = KP_NAMES.index(normalized)
+        id_filter = {int(t) for t in track_ids} if track_ids is not None else None
+
+        trajectory: dict[int, list[tuple[float, float]]] = {}
+        for frame in self.frames:
+            for obj in frame.get("objects", []):
+                tracked_id = obj.get("tracked_id")
+                if tracked_id is None:
+                    continue
+                tracked_id = int(tracked_id)
+                if id_filter is not None and tracked_id not in id_filter:
+                    continue
+                kp_sat = obj.get("kp_sat")
+                if not kp_sat or kp_idx >= len(kp_sat):
+                    continue
+                kp = kp_sat[kp_idx]
+                if not self._valid_point(kp):
+                    continue
+                trajectory.setdefault(tracked_id, []).append((float(kp[0]), float(kp[1])))
+
+        return trajectory
 
     def plot_scatter(
         self,
@@ -433,6 +477,7 @@ class TrajectoryPlotter:
         show_heading_arrows: bool = False,
         show_id_labels: bool = False,
         show_keypoints: bool = False,
+        keypoint_trajectory_names: list[str] | None = None,
         skip_out_of_bounds: bool = True,
         title: str | None = None,
         dpi: int = 300,
@@ -550,6 +595,28 @@ class TrajectoryPlotter:
                 label_point = self._label_point(points)
                 if label_point is not None:
                     label_requests.append((track_id, label_point, color))
+
+        if keypoint_trajectory_names:
+            kp_line_width = min(3.0, 1.2 * size_mult)
+            for kp_index, kp_name in enumerate(keypoint_trajectory_names):
+                kp_color = _KP_TRAJECTORY_COLORS[kp_index % len(_KP_TRAJECTORY_COLORS)]
+                kp_trajectory = self.extract_keypoint_trajectory(kp_name, track_ids=trajectories.keys())
+                legend_line = None
+                for track_id in sorted(kp_trajectory):
+                    points = kp_trajectory[track_id]
+                    kp_x = [point[0] for point in points]
+                    kp_y = [point[1] for point in points]
+                    legend_line = ax.plot(
+                        kp_x,
+                        kp_y,
+                        linestyle="-",
+                        linewidth=kp_line_width,
+                        color=kp_color,
+                        alpha=0.85,
+                        zorder=1.9,
+                    )[0]
+                if legend_line is not None:
+                    legend_items.append((legend_line, kp_name.replace("-", "_")))
 
         if transform:
             ax.set_xlim(transform["view_min_x"], transform["view_max_x"])

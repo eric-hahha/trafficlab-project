@@ -24,6 +24,13 @@ def _parse_ids(value: str | None) -> list[int] | None:
     return ids or None
 
 
+def _parse_kp_names(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    names = [item.strip() for item in value.split(",") if item.strip()]
+    return names or None
+
+
 def _default_plot_output(input_path: Path, suffix: str = "trajectories") -> Path:
     name = input_path.name
     if name.endswith(".json.gz"):
@@ -68,6 +75,13 @@ def add_common_plot_args(parser: argparse.ArgumentParser) -> None:
         "--show-keypoints",
         action="store_true",
         help="Draw each visible track's kp_sat keypoint projections, colored by car part.",
+    )
+    parser.add_argument(
+        "--keypoint-trajectories",
+        help="Comma-separated kp_sat keypoint names (see KP_NAMES in "
+        "trafficlab/motion/keypoints_openpifpaf.py; hyphens or underscores both work) "
+        "to draw as connected per-track paths, e.g. "
+        "front-glass-top-left,front-door-top-left,front-door-base-left.",
     )
     parser.add_argument(
         "--show-heading-arrows",
@@ -130,6 +144,7 @@ def run_plot(args: argparse.Namespace) -> None:
         show_heading_arrows=args.show_heading_arrows,
         show_id_labels=args.show_id_labels,
         show_keypoints=args.show_keypoints,
+        keypoint_trajectory_names=_parse_kp_names(args.keypoint_trajectories),
         skip_out_of_bounds=not args.include_out_of_bounds,
         title=args.title,
         min_points=args.min_points,
@@ -162,6 +177,7 @@ def run_smooth_and_plot(args: argparse.Namespace) -> None:
         show_heading_arrows=args.show_heading_arrows,
         show_id_labels=args.show_id_labels,
         show_keypoints=args.show_keypoints,
+        keypoint_trajectory_names=_parse_kp_names(args.keypoint_trajectories),
         skip_out_of_bounds=not args.include_out_of_bounds,
         title=args.title,
         min_points=args.min_points,
