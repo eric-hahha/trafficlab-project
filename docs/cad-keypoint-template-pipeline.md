@@ -70,7 +70,7 @@ python scripts/run_keypoints_openpifpaf.py \
   --cad-template cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json
 ```
 
-設定 `--cad-template <template.json>` 時，直接使用該 JSON 裡的 `(24, 3)` 模板取代 `build_car_template(dims)`——`--spec-csv`/`--body-type` 與 `prior_dimensions.json` 全部被忽略。載入時會做兩項一致性檢查：
+設定 `--cad-template <template.json>` 時，直接使用該 JSON 裡的 `(24, 3)` 模板取代 `build_car_template(dims)`——`prior_dimensions.json` 會被忽略。載入時會做兩項一致性檢查：
 
 - `template.json` 的 `kp_names` 必須跟目前這份程式碼的 `KP_NAMES` 順序完全一致，否則 `ValueError`（提示用 `scripts/build_cad_keypoint_template.py` 重新產生）——防止 `KP_NAMES` 改過順序後，舊模板被默默套用到錯位的關鍵點上。
 - `template` 陣列形狀必須是 `(24, 3)`，否則 `ValueError`。

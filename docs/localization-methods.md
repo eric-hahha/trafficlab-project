@@ -73,14 +73,14 @@ wheel_localization:
 - 使用全部 24 個 kp（任意 2 個以上即可定位）
 - 車頂（高可見）、車燈、後視鏡均可參與擬合
 
-**3D 樣板來源**（兩種方式，互斥）：
+**3D 樣板來源**：
 
 | 來源 | 尺寸精度 | 中間高度 kp | 落地成本 | 現行狀態 |
 |------|---------|------------|---------|---------|
-| 規格庫實測值（`--spec-csv engines.csv`）| 外框/輪胎實測 | 估算（spec sheet 不含）| 低（下載 CSV 即可）| ⚠️ 尚未下載 |
-| CAD 模型轉換（幾何啟發式 / Blender 手標）| 全 kp 同源 | 實測 | 高（語義映射工作量大）| 📋 未實作 |
+| `prior_dimensions.json` 湊整估算值 → 內建 `_FALLBACK_DIMS` | 估算 | 估算 | — | ✅ 目前實際使用 |
+| CAD 模型轉換（幾何啟發式 / Blender 手標，`--cad-template`）| 全 kp 同源 | 實測 | 高（語義映射工作量大）| 部分實作（`scripts/build_cad_keypoint_template.py`，見 `docs/cad-keypoint-template-pipeline.md`）|
 
-目前實際使用 `prior_dimensions.json`（湊整估算值）或內建 `_FALLBACK_DIMS`，兩者均非實測。詳見 `docs/keypoints-openpifpaf-intro.md`。
+詳見 `docs/keypoints-openpifpaf-intro.md`。
 
 **現存限制**：
 - PifPaf domain gap（ApolloCar3D 前視視角訓練）仍使偵測率偏低

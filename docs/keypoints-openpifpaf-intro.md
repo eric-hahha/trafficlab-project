@@ -102,8 +102,8 @@ heading 公式用 `atan2(dy, dx)`（不取負號），跟 `trafficlab/motion/kin
 
 | 優先順序 | 來源 | 說明 |
 |---------|------|------|
-| 1 | `--spec-csv engines.csv` | [ilyasozkurt/automobile-models-and-specs](https://github.com/ilyasozkurt/automobile-models-and-specs) 規格庫，過濾房車合理範圍後取中位數 |
-| 2 | `prior_dimensions.json` | 腳本在 `--g-proj` 同目錄自動搜尋 |
+| 1 | `--cad-template <template.json>` | `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板，直接取代 `build_car_template(dims)` |
+| 2 | `prior_dimensions.json` | 腳本在 `--g-proj` 同目錄往上層自動搜尋 |
 | 3 | `_FALLBACK_DIMS`（內建）| L=3.8m W=1.8m H=1.55m TW=1.53m WB=2.55m |
 
 ---
@@ -144,7 +144,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
   --localizer reprojection
 ```
 
-### 使用預先算好的 YOLO 框 json + 車輛規格庫樣板
+### 使用預先算好的 YOLO 框 json + 車型專屬 CAD 樣板
 
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
@@ -152,7 +152,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
   --g-proj location/test21/G_projection_test21.json \
   --method geometric \
   --yolo-boxes-json path/to/replay.json.gz \
-  --spec-csv path/to/engines.csv
+  --cad-template cad_models/<model>/keypoint_template_<model>.json
 ```
 
 **輸出**：`output/haware/<location_code>/<video_stem>.json.gz`（標準 replay JSON 格式，可直接載入 GUI）

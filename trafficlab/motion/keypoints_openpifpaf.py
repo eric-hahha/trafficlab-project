@@ -9,10 +9,7 @@ Reference: docs/3d-keypoint-template-localization.md § 3B
 """
 from __future__ import annotations
 
-import csv
-import json
 import math
-import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -30,80 +27,6 @@ _FALLBACK_DIMS = {
 # Same ratios as wheel_localization.py for when track/wheelbase are absent
 _TRACK_RATIO     = 0.85   # track_width / width
 _WHEELBASE_RATIO = 0.67   # wheelbase / length
-
-
-def compute_car_dims_from_spec_csv(csv_path: str, body_type: str = 'Sedan') -> dict:
-    """Parse ilyasozkurt/automobile-models-and-specs engines.csv and return median
-    sedan dimensions in metres.
-
-    The CSV stores specs as nested JSON with a "Dimensions" section whose values
-    follow the pattern "X.X In (YYYY Mm)" (parenthesised mm value).
-    Filters to plausible sedan ranges before computing medians.
-    Falls back to _FALLBACK_DIMS if the file is missing or yields no rows.
-    """
-    def _extract_mm(val: str) -> Optional[float]:
-        # Handles both "4509 Mm" and "1,590/1,570 Mm" (front/rear track average)
-        m = re.findall(r'\(([0-9,./]+)\s*[Mm]m\)', val)
-        if not m:
-            return None
-        s = m[0].replace(',', '')
-        if '/' in s:
-            parts = [float(p) for p in s.split('/')]
-            return sum(parts) / len(parts)
-        return float(s)
-
-    buckets: dict[str, list[float]] = {k: [] for k in ('length', 'width', 'height', 'track', 'wheelbase')}
-    try:
-        with open(csv_path, newline='', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    specs = json.loads(row.get('specs', '{}'))
-                    dims = specs.get('Dimensions', {})
-                    if not dims:
-                        continue
-                    L  = _extract_mm(dims.get('Length:', ''))
-                    W  = _extract_mm(dims.get('Width:', ''))
-                    H  = _extract_mm(dims.get('Height:', ''))
-                    T  = _extract_mm(dims.get('Front/Rear Track:', ''))
-                    WB = _extract_mm(dims.get('Wheelbase:', ''))
-                    if None in (L, W, H, T, WB):
-                        continue
-                    # Plausible sedan range in mm
-                    if not (3800 < L < 5200): continue
-                    if not (1600 < W < 2000): continue
-                    if not (1300 < H < 1650): continue
-                    if not (1300 < T < 1700): continue
-                    if not (2400 < WB < 3000): continue
-                    buckets['length'].append(L)
-                    buckets['width'].append(W)
-                    buckets['height'].append(H)
-                    buckets['track'].append(T)
-                    buckets['wheelbase'].append(WB)
-                except Exception:
-                    continue
-    except FileNotFoundError:
-        return dict(_FALLBACK_DIMS)
-
-    n = len(buckets['length'])
-    if n == 0:
-        return dict(_FALLBACK_DIMS)
-
-    def _median(vals):
-        s = sorted(vals)
-        return s[len(s) // 2] / 1000.0  # mm → m
-
-    result = {
-        'length':      _median(buckets['length']),
-        'width':       _median(buckets['width']),
-        'height':      _median(buckets['height']),
-        'track_width': _median(buckets['track']),
-        'wheelbase':   _median(buckets['wheelbase']),
-    }
-    print(f"[haware] Spec CSV: {n} sedans → "
-          f"L={result['length']:.3f} W={result['width']:.3f} H={result['height']:.3f} "
-          f"TW={result['track_width']:.3f} WB={result['wheelbase']:.3f} m")
-    return result
 
 
 def build_car_template(dims: dict) -> np.ndarray:

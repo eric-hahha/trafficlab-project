@@ -108,7 +108,7 @@ $\gamma = H/Z$ 是該點相對參考平面的高度 $H$ 除以相對相機的深
 
 **原理**：GCP 不用現場量測的控制點，改用不同車輛的各部位 keypoint（輪、頂、鏡等）：Z 值用車型模板高度（body-type 統計先驗，邏輯同方向 7），X/Y 則套用既有 homography 把車輛地面接觸點換算成世界座標來錨定。用這組 GCP 解 `cv2.solvePnP` 得到相機姿態/`z_cam`，再拿去餵給既有的 `--localizer reprojection` 做逐車定位。
 
-**跟本專案的接點**：可以直接沿用 `--method geometric`/`--method segmentation` 等流程已經在抓的車輛 keypoint（`kp_cctv`）與 `--spec-csv`/`prior_dimensions.json` 車型高度先驗，組出 GCP 對應點；解出來的參數可直接替換 `GProjection` 現有的 parallax 參數，下游 `--localizer reprojection` 不用改架構。
+**跟本專案的接點**：可以直接沿用 `--method geometric`/`--method segmentation` 等流程已經在抓的車輛 keypoint（`kp_cctv`）與 `prior_dimensions.json` 車型高度先驗，組出 GCP 對應點；解出來的參數可直接替換 `GProjection` 現有的 parallax 參數，下游 `--localizer reprojection` 不用改架構。
 
 **風險與誤差來源**
 

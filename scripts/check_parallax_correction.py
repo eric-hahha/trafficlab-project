@@ -37,7 +37,6 @@ from trafficlab.projection.parallax_reprojection import (
 from trafficlab.motion.keypoints_openpifpaf import (
     _FALLBACK_DIMS,
     build_car_template,
-    compute_car_dims_from_spec_csv,
 )
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.trajectory.io import infer_location_code, load_json, resolve_satellite_image_path
@@ -53,12 +52,10 @@ def resolve_g_projection_path(location_code, *, explicit_path=None, project_root
     return candidate if candidate.exists() else None
 
 
-def resolve_dims(g_proj_dir: str, spec_csv: str | None, body_type: str, vehicle_class: str) -> dict:
-    """Same fallback chain as run_keypoints_openpifpaf.py: --spec-csv, else
-    walk up from the G_projection's directory looking for prior_dimensions.json,
-    else the built-in defaults."""
-    if spec_csv:
-        return compute_car_dims_from_spec_csv(spec_csv, body_type=body_type)
+def resolve_dims(g_proj_dir: str, vehicle_class: str) -> dict:
+    """Same fallback chain as run_keypoints_openpifpaf.py: walk up from the
+    G_projection's directory looking for prior_dimensions.json, else the
+    built-in defaults."""
     d = g_proj_dir
     dims_path = None
     for _ in range(5):
@@ -97,8 +94,6 @@ def main() -> None:
                               "config resolved now, instead of reading kp_sat from the replay JSON. "
                               "Use after editing/correcting a location's G_projection_<code>.json, so "
                               "you don't have to re-run inference just to see the new projection.")
-    parser.add_argument("--spec-csv", help="engines.csv for --recompute's car template (see run_keypoints_openpifpaf.py).")
-    parser.add_argument("--body-type", default="Sedan", help="Used with --spec-csv (default Sedan).")
     parser.add_argument("--vehicle-class", default="car",
                          help="prior_dimensions.json key for --recompute's car template (default car).")
     parser.add_argument("-o", "--out", help="Output PNG path (default: next to input JSON).")
@@ -120,7 +115,7 @@ def main() -> None:
 
     template = None
     if args.recompute:
-        dims = resolve_dims(str(g_proj_path.parent), args.spec_csv, args.body_type, args.vehicle_class)
+        dims = resolve_dims(str(g_proj_path.parent), args.vehicle_class)
         print(f"[check_parallax_correction] --recompute: using dims={dims}")
         template = build_car_template(dims)
 

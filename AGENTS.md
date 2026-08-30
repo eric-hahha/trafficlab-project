@@ -150,9 +150,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | Flag | 預設值 | 說明 |
 |------|---------|-------|
 | `--checkpoint` | `shufflenetv2k16-apollo-24` | PifPaf model |
-| `--spec-csv` | *(無)* | automobile-models-and-specs 的 `engines.csv`；找不到就退回 `prior_dimensions.json`，再找不到就用內建預設值 |
-| `--body-type` | `Sedan` | 與 `--spec-csv` 搭配使用 |
-| `--cad-template` | *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON（如 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`）；設定時直接套用這個模板，取代 `build_car_template(dims)`，`--spec-csv`/`--body-type` 與 `prior_dimensions.json` 都會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md` |
+| `--cad-template` | *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON（如 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`）；設定時直接套用這個模板，取代 `build_car_template(dims)`，`prior_dimensions.json` 會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md` |
 | `--kp-conf` | `0.2` | 關鍵點信心度閾值 |
 | `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
 | `--start-frame` | `0` | 開始處理的第一幀；在此之前的幀會被讀取後丟棄，而不是用 seek |

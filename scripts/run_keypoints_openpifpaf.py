@@ -25,8 +25,7 @@ Usage:
     PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \\
         --video location/test21/footage/test21-4.mp4 \\
         --g-proj location/test21/G_projection_test21.json \\
-        --method geometric \\
-        --spec-csv /tmp/autospec/engines.csv
+        --method geometric
 """
 import argparse
 import gzip
@@ -46,7 +45,6 @@ from trafficlab.projection.g_projection import GProjection
 from trafficlab.motion.keypoints_openpifpaf import (
     OpenPifPafKeypointsLocalizer,
     build_car_template,
-    compute_car_dims_from_spec_csv,
     _FALLBACK_DIMS,
     KP_NAMES,
 )
@@ -247,16 +245,12 @@ def main():
                         help='Output .json.gz path '
                              '(default: output/haware/<location>/<video_stem>.json.gz)')
     parser.add_argument('--checkpoint', default='shufflenetv2k16-apollo-24')
-    parser.add_argument('--spec-csv',   default=None,
-                        help='engines.csv from ilyasozkurt/automobile-models-and-specs')
-    parser.add_argument('--body-type',  default='Sedan')
     parser.add_argument('--cad-template', default=None,
                         help='Path to a per-model keypoint template JSON from '
                              'scripts/build_cad_keypoint_template.py (e.g. '
                              'cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json). '
                              'When set, this exact 24-keypoint template is used directly instead of '
-                             'build_car_template(dims) — --spec-csv/--body-type and '
-                             'prior_dimensions.json are ignored.')
+                             'build_car_template(dims) — prior_dimensions.json is ignored.')
     parser.add_argument('--kp-conf',    type=float, default=0.2)
     parser.add_argument('--frames',          type=int,   default=-1,  help='-1 = all')
     parser.add_argument('--pifpaf-threshold', type=float, default=0.01,
@@ -357,25 +351,22 @@ def main():
             'width': float(template[:, 0].max() - template[:, 0].min()),
         }
     else:
-        if args.spec_csv:
-            dims = compute_car_dims_from_spec_csv(args.spec_csv, body_type=args.body_type)
+        d = g_proj_dir
+        dims_path = None
+        for _ in range(5):
+            candidate = os.path.join(d, 'prior_dimensions.json')
+            if os.path.exists(candidate):
+                dims_path = candidate
+                break
+            d = os.path.dirname(d)
+        if dims_path:
+            with open(dims_path) as f:
+                pj = json.load(f)
+            dims = pj.get('measurements_visdrone', {}).get('car', dict(_FALLBACK_DIMS))
+            print(f'[haware] Using prior_dimensions.json: {dims}')
         else:
-            d = g_proj_dir
-            dims_path = None
-            for _ in range(5):
-                candidate = os.path.join(d, 'prior_dimensions.json')
-                if os.path.exists(candidate):
-                    dims_path = candidate
-                    break
-                d = os.path.dirname(d)
-            if dims_path:
-                with open(dims_path) as f:
-                    pj = json.load(f)
-                dims = pj.get('measurements_visdrone', {}).get('car', dict(_FALLBACK_DIMS))
-                print(f'[haware] Using prior_dimensions.json: {dims}')
-            else:
-                dims = dict(_FALLBACK_DIMS)
-                print(f'[haware] Using built-in fallback dims: {dims}')
+            dims = dict(_FALLBACK_DIMS)
+            print(f'[haware] Using built-in fallback dims: {dims}')
 
         template = build_car_template(dims)
     localizer = OpenPifPafKeypointsLocalizer(g_engine, template, kp_conf=args.kp_conf)
