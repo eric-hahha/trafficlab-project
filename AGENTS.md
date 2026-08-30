@@ -410,6 +410,24 @@ python scripts/reference_point_calibration_tool.py \
 
 核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/diagnostics/parallax_correction_check.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
 
+### 13. CCTV 影格選取工具
+
+獨立的 GUI 工具，用來從 location 的 footage 裡挑一幀存成 `location/<location_code>/cctv_<location_code>.png`。下拉選單先選 location（只列出 `footage/` 底下有 `.mp4` 的 location），再選該 location 的某支影片；可播放／暫停、上一幀／下一幀，或拖曳 slider／輸入 spinbox 跳到指定幀。輸出圖片維持原影片的寬高，不做任何縮放。
+
+```bash
+source /opt/anaconda3/bin/activate trafficlab
+python scripts/cctv_frame_picker_tool.py
+```
+
+| Flag | 說明 |
+|------|------|
+| `--location-code` | 開啟時預先選取的 location（預設：`location/` 底下第一個符合條件的） |
+| `--video` | 開啟時預先選取的影片路徑（預設：所選 location 的第一支影片） |
+
+按「存成 CCTV 圖片」會寫到 `location/<location_code>/cctv_<location_code>.png`；若檔案已存在會先跳出確認覆寫對話框（無法復原，除非該檔案本身有版本控制）。
+
+核心程式碼：`trafficlab/gui/tools/cctv_frame_picker_tool.py`（GUI 本體，共用 `trafficlab/visualization/video_player.py` 的 `VideoPlayer` 與 `undistort_stage.py` 的 `ImageViewer`）；跳幀時沿用 `reference_point_calibration_tool.py` 的 seek-with-sequential-fallback 邏輯，因為部分 AV1 編碼的素材直接 seek 會靜默失敗。
+
 ## 推論相關注意事項
 
 - GUI 的 inference 分頁與 `scripts/run_inference.py` 都使用 `trafficlab.inference.pipeline.InferencePipeline`。
