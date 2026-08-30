@@ -83,8 +83,7 @@ def main():
     p.add_argument('--kp-color-mode', choices=['track', 'part'], default='track',
                    help='Only applies to --right-panel sat: color sat keypoints by vehicle track '
                         '(default) or by car part (wheel/light/plate/mirror/corner/low/up). '
-                        '--right-panel parallax always colors by car part, matching '
-                        'check_parallax_correction.py.')
+                        '--right-panel parallax always colors by car part.')
     p.add_argument('--no-sat-keypoints', action='store_true',
                    help='Do not draw keypoints on the SAT panel (box/arrow/coords dot/label unaffected). '
                         'Only valid with --right-panel sat.')

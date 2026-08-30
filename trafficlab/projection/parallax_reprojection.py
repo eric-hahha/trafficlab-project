@@ -122,18 +122,6 @@ def compute_view_extent(
     return (min(xs) - pad, max(xs) + pad), (max(ys) + pad, min(ys) - pad)
 
 
-def pick_richest_frame(
-    replay_data: dict, g_engine, kp_conf: float = 0.2, template=None,
-) -> tuple[Optional[int], list[dict]]:
-    """Auto-pick the frame with the most valid pairs, summed across its objects."""
-    best_idx, best_records, best_n = None, [], -1
-    for frame_index, records in iter_frame_records(replay_data, g_engine, kp_conf=kp_conf, template=template):
-        n = sum(len(r["pairs"]) for r in records)
-        if n > best_n:
-            best_idx, best_records, best_n = frame_index, records, n
-    return best_idx, best_records
-
-
 def plot_frame_pre_post_keypoints(
     frame_index: int,
     records: list[dict],

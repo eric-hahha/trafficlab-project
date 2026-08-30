@@ -628,9 +628,8 @@ class ReferencePointCalibrationWidget(QWidget):
 
     @staticmethod
     def _resolve_verify_car_dims(g_proj_dir: Path) -> dict:
-        # Same fallback chain as scripts/check_parallax_correction.py's
-        # resolve_dims: walk up from the G_projection's directory looking for
-        # prior_dimensions.json, else the built-in defaults.
+        # Dimension fallback chain: walk up from the G_projection's directory
+        # looking for prior_dimensions.json, else the built-in defaults.
         d = g_proj_dir
         for _ in range(5):
             candidate = d / "prior_dimensions.json"

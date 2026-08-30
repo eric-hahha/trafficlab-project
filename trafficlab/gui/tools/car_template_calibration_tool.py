@@ -1810,10 +1810,8 @@ class CarTemplateCalibrationWidget(QWidget):
             return None
 
     def _pick_verify_frame(self, g_engine, kp_conf: float, tid_filter: Optional[int]) -> Optional[int]:
-        """Same idea as parallax_reprojection.pick_richest_frame, but
-        honoring the tracked_id filter -- that helper has no such option and
-        this module doesn't extend it, so the (short) frame-scoring loop is
-        duplicated here rather than there."""
+        """Pick the frame with the most valid pre/post keypoint pairs (summed
+        across objects), honoring the tracked_id filter."""
         best_idx, best_n = None, -1
         for frame_index, records in iter_frame_records(
             self._replay_data, g_engine, kp_conf=kp_conf, template=self._template.xhz,
