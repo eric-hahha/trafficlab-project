@@ -117,13 +117,7 @@ source /opt/anaconda3/bin/activate trafficlab && PYTHONPATH=$(pwd) PYTORCH_ENABL
 
 Config 的 `model` 區塊預設是偵測模型（regression box 直接拿去投影）。設定 `model.type: "seg"` 可以改用 segmentation checkpoint（如 `models/yolo11m-seg.pt`）：box 來源改成從分割 mask 的最大 contour 算出的 tight box，其餘流程（追蹤、投影、kinematics）不變。seg 模式下 `model.classes` 為必填，是 COCO 類別名稱 → 專案內部類別名稱的對照表（例如 `{car: car, motorcycle: two_wheeler}`）；分割模型偵測到的每個物件都會算 tight box，但只有在這張表裡的類別會被定位、寫進輸出，其餘（如 `person`）算完 box 後就跳過。seg 模式的輸出固定寫到 `output/yolobox-seg/model-<model_name>_<tracker_type>/<config_name>/<location_code>/`，忽略一般模式用的 `output/` 輸出根目錄。
 
-### 3. 後處理（Postprocess）
-
-```bash
-source /opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
-```
-
-### 4. keypoints-openpifpaf
+### 3. keypoints-openpifpaf
 
 在每一幀上執行 OpenPifPaf Apollo-24 偵測，並透過 height-aware 關鍵點模板比對來定位每輛車。輸出是標準的 TrafficLab replay JSON，可以在 GUI 中載入（衛星座標位置、車頭朝向、車輛外框，以及 CCTV 關鍵點疊圖）。`--method` 是必填參數，用來選擇兩種互斥的逐幀策略之一 — 只有被選中策略自己的 flag 才會生效。
 
@@ -202,7 +196,7 @@ python scripts/run_keypoints_openpifpaf.py --video <video_path> \
   --seg-masks-json <mask_json_path> --localizer reprojection
 ```
 
-### 5. 重投影關鍵點視覺化
+### 4. 重投影關鍵點視覺化
 
 把 replay JSON 裡單一 frame 的逐車輛 `kp_sat`/`sat_coords` 重投影結果畫到衛星影像上，用於檢查重投影結果。
 
@@ -226,7 +220,7 @@ python scripts/plot_reprojection_keypoints.py \
 
 輸出：預設把 PNG 存在輸入 JSON 旁邊（`<stem>.keypoints_frame<N>.png`）。
 
-### 6. CCTV + SAT 合成輸出
+### 5. CCTV + SAT 合成輸出
 
 把整份 replay JSON 批次渲染成 PNG：預設每幀左 CCTV、右 SAT 疊圖，並排輸出。
 
@@ -264,7 +258,7 @@ ffmpeg -framerate 25 -i <out_dir>/frame_%04d.png \
 
 （只有在合成出來的寬／高是奇數、`libx264` 不接受時，才需要 `pad` filter。）
 
-### 7. 軌跡繪圖
+### 6. 軌跡繪圖
 
 涵蓋 `plot`（整條軌跡所有點畫一張圖）與 `frames`（對選定 id 用同一個固定裁切窗口逐幀輸出 PNG，適合接 ffmpeg 轉影片、畫面不跳動）：
 
@@ -292,13 +286,13 @@ source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools
 source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
 ```
 
-### 8. 對 script 做語法檢查
+### 7. 對 script 做語法檢查
 
 ```bash
 source /opt/anaconda3/bin/activate trafficlab && python -m py_compile scripts/run_inference.py
 ```
 
-### 9. 車輛模板 GCP 校正工具
+### 8. 車輛模板 GCP 校正工具
 
 獨立的 GUI 工具，把「方向 4：車輛模板作為 PnP GCP」跟「方向 7：多參考物最小二乘法」接在一起：在 CCTV 畫面上點 2 個輪胎接地點，工具用既有 ground homography 把車輛 CAD 模板（24 個關鍵點）套上正確的 sat 位置、朝向與大小，再跟該幀 replay JSON 的 `kp_cctv` 配對，產生多組「頭點像素＋腳點真實位置＋真實高度」參考點，餵給跟方向 7 完全共用的 `trafficlab.projection.reference_point_calibration.calibrate()` 解出 `cam_sat_xy`/`z_cam_meters`。完整使用步驟（5 個分頁）、設計細節與常見問題見 `docs/car-template-calibration-tool-guide.md`。
 
@@ -321,7 +315,7 @@ python scripts/car_template_calibration_tool.py \
 
 核心程式碼：`trafficlab/projection/car_template_placement.py`（模板數學，純 numpy）、`trafficlab/gui/tools/car_template_calibration_tool.py`（GUI 本體）；共用 `trafficlab/projection/reference_point_calibration.py` 的 `calibrate()`，以及「5. 驗證」tab 用到的 `trafficlab/projection/parallax_reprojection.py`。
 
-### 10. 多參考物最小二乘校正工具
+### 9. 多參考物最小二乘校正工具
 
 獨立的 GUI 工具，實作方向 7（多參考物最小二乘法）：蒐集 N 個（N ≥ 2）已知真實高度的參考物件的頭／腳像素座標，套用非線性最小二乘同時解出相機的 sat 平面位置（`cam_sat_xy`）與高度（`z_cam_meters`）——是現有 `pars_stage.py` 兩物件手動標定法的推廣，參考物件數量從固定 2 個放寬到任意多個，數學模型相同。完整使用步驟（4 個分頁）與常見問題見 `docs/reference-point-calibration-tool-guide.md`。
 
@@ -344,7 +338,7 @@ python scripts/reference_point_calibration_tool.py \
 
 核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/projection/parallax_reprojection.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
 
-### 11. CCTV 影格選取工具
+### 10. CCTV 影格選取工具
 
 獨立的 GUI 工具，用來從 location 的 footage 裡挑一幀存成 `location/<location_code>/cctv_<location_code>.png`。下拉選單先選 location（只列出 `footage/` 底下有 `.mp4` 的 location），再選該 location 的某支影片；可播放／暫停、上一幀／下一幀，或拖曳 slider／輸入 spinbox 跳到指定幀。輸出圖片維持原影片的寬高，不做任何縮放。
 
