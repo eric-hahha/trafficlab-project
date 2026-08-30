@@ -15,7 +15,8 @@
 | **C. H-aware 3D Template** | OpenPifPaf（全圖）| 24 kp + 各自高度先驗 → SVD 擬合 | 🔧 評估中 | 高（理論）| 中（受 PifPaf domain gap）|
 | **D. PnP（Perspective-n-Point）** | OpenPifPaf + 3D 樣板 + K | 2D–3D 對應 → cv2.solvePnP → 6-DoF 姿態 | ❌ 不採用 | 低（高俯角退化）| 同 PifPaf |
 | **E. BEVHeight / BEVHeight++** | 單張影像（需 K）| BEV 特徵 + height-aware voxel pooling → 7-DoF bbox | 📋 待測試 | 高（路側設計）| 高（端對端偵測）|
-| **F. CarFusion YOLOv8 Pose** | 整張影像 | YOLOv8 pose，14 kp，路口視角訓練 | ✅ 已評估、已整合跨幀追蹤 | 中高（同 SVD 擬合法）| 高（one-stage，未見明顯 domain gap）|
+
+（曾評估並短暫整合過 F. CarFusion YOLOv8 Pose，one-stage 14 kp、路口視角訓練；後決定棄用、程式碼已移除，外部 repo 分析仍見 `docs/method-survey.md`。）
 
 ---
 
@@ -147,20 +148,6 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
 
 ---
 
-## F. CarFusion YOLOv8 Pose
-
-**Repo**：`Habib0905/Vehicle-Pose-Estimation`  
-**訓練資料**：CarFusion（Pittsburgh 路口攝影機，路側視角）
-**詳細說明**：`docs/keypoints-carfusion-intro.md`（原理、演算法）、`docs/keypoints-carfusion-tracking.md`（跨幀追蹤整合、除錯過程、測試數字）
-
-**原理**：YOLOv8 pose 一階段輸出 14 個車輛 keypoint（4 輪 + 4 燈 + 4 車頂角 + 排氣管 + 中心），核心配準演算法跟 C. H-aware 完全相同（Procrustes SVD），差別只在偵測前段（one-stage YOLO vs OpenPifPaf）跟 keypoint 定義。
-
-**已確認**：訓練視角比 ApolloCar3D 更接近路側交叉口，實測未見明顯 domain gap；已整合跨幀 `tracked_id`（ultralytics ByteTrack）與 GUI 播放器相容輸出（`bbox_2d`/`sat_floor_box`/`bbox_3d` 等）。
-
-**現存限制**：跟 C. H-aware 一樣依賴 `prior_dimensions.json`/`_FALLBACK_DIMS` 的車輛尺寸估算值，非實測；ByteTrack 門檻需要針對低信心/部分入鏡車輛調整（見 `docs/keypoints-carfusion-tracking.md`）。
-
----
-
 ## 方案選擇建議
 
 ```
@@ -176,10 +163,6 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
   └─ E. BEVHeight++
        ├─ 先在 Colab 跑 out-of-box 看 yaw 品質
        └─ 若不足 → WARM-3D 弱監督遷移
-
-已評估、與 C 並列的候選（one-stage、覆蓋率較高）
-  └─ F. CarFusion YOLOv8 Pose
-       └─ 已整合跨幀追蹤（ByteTrack）+ GUI 播放器輸出
 ```
 
 ---
@@ -192,5 +175,3 @@ minimize  Σᵢ || project(template_i, R, T, K) - (u_i, v_i) ||²
 | `docs/3d-keypoint-template-localization.md` | H-aware 完整技術文件（概念、PnP vs h-aware、樣板設計）|
 | `docs/haware-id-matching.md` | Track ID 橋接實作（Method B，bbox IoU 配對）|
 | `docs/method-survey.md` | 車輛**朝向估算**方法調查（Pirazh / BEVHeight / YAEN 等）|
-| `docs/keypoints-carfusion-intro.md` | CarFusion 方法介紹、演算法細節（同 SVD 擬合，14 kp）|
-| `docs/keypoints-carfusion-tracking.md` | CarFusion 跨幀追蹤（ByteTrack）整合過程、除錯細節、測試數字 |

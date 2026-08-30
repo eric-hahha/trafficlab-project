@@ -11,7 +11,7 @@
 - 有 `road_heading`（路網方向提示）時選最接近路網方向的候選；沒有的話預設選「背離相機」那個候選
 - 回傳 `(heading_deg, confidence)`，`confidence` 落在 0–1
 
-跟 h-aware / CarFusion 的關鍵點定位法是完全不同、更輕量的手段——不需要姿態模型，任何有 bbox 的偵測都能用。
+跟 h-aware 的關鍵點定位法是完全不同、更輕量的手段——不需要姿態模型，任何有 bbox 的偵測都能用。
 
 ## 目前狀態：已歸檔，pipeline 不再依賴
 

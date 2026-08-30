@@ -75,7 +75,7 @@ python scripts/run_keypoints_openpifpaf.py \
 - `template.json` 的 `kp_names` 必須跟目前這份程式碼的 `KP_NAMES` 順序完全一致，否則 `ValueError`（提示用 `scripts/build_cad_keypoint_template.py` 重新產生）——防止 `KP_NAMES` 改過順序後，舊模板被默默套用到錯位的關鍵點上。
 - `template` 陣列形狀必須是 `(24, 3)`，否則 `ValueError`。
 
-`car_template_calibration_tool.py`（見 AGENTS.md 第 11 節）也做了同樣的 `KP_NAMES` 一致性檢查，兩處邏輯彼此獨立但目的相同。
+`car_template_calibration_tool.py`（見 AGENTS.md 第 10 節）也做了同樣的 `KP_NAMES` 一致性檢查，兩處邏輯彼此獨立但目的相同。
 
 ## 檔案對照表
 

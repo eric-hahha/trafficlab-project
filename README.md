@@ -36,7 +36,7 @@ TrafficLab-3D/
 │   ├── gui/                              （GUI 實作，含獨立的校正工具視窗）
 │   ├── inference/                        （原生 YOLO 偵測＋追蹤 pipeline）
 │   ├── keypoint/                         （OpenPifPaf 定位法使用的關鍵點 model）
-│   ├── motion/                           （OpenPifPaf / CarFusion 關鍵點定位邏輯、運動學）
+│   ├── motion/                           （OpenPifPaf 關鍵點定位邏輯、運動學）
 │   ├── projection/                       （G-projection、SVG、消失點與參考點校正）
 │   ├── diagnostics/                      （校正／幾何驗證用的診斷腳本邏輯）
 │   ├── trajectory/                       （推論後的軌跡平滑化與靜態繪圖）
@@ -65,7 +65,7 @@ TrafficLab-3D/
 TrafficLab 是一套端到端的事故重建工具，涵蓋：
 
 - **校正（Calibration）：**在任意 CCTV 畫面與其衛星地圖之間建立雙向投影關係，支援自訂 SVG。
-- **定位（Localization）：**用多種可互換的方式，逐幀把每輛車放到衛星地圖上正確的位置——原生的 YOLO bbox＋tracker pipeline，或是在畫面遮蔽嚴重、無法穩定取得乾淨 bbox 輪廓時改用關鍵點定位（OpenPifPaf 或 CarFusion）。
+- **定位（Localization）：**用多種可互換的方式，逐幀把每輛車放到衛星地圖上正確的位置——原生的 YOLO bbox＋tracker pipeline，或是在畫面遮蔽嚴重、無法穩定取得乾淨 bbox 輪廓時改用關鍵點定位（OpenPifPaf）。
 - **視覺化（Visualization）：**CCTV 3D bounding box 與衛星地圖 floor box／速度／朝向並排同步呈現的「數位分身」體驗，方便重現事故經過。
 
 ![WelcomeTab](./media/readme-images/tl_8.png)
@@ -121,10 +121,9 @@ Inference Tab 是管理所有輸出 JSON 檔的地方，這些檔案就是視覺
 - 物件 tracker。
 - 速度與朝向的平滑化運動學參數。
 
-當畫面沒辦法逐幀取得乾淨、未遮蔽的 bounding box 輪廓時，TrafficLab 也提供兩套關鍵點定位 pipeline，透過 CLI 執行，輸出的 replay JSON 跟其他方法一樣可以直接載入 Visualization Tab：
+當畫面沒辦法逐幀取得乾淨、未遮蔽的 bounding box 輪廓時，TrafficLab 也提供關鍵點定位 pipeline，透過 CLI 執行，輸出的 replay JSON 跟其他方法一樣可以直接載入 Visualization Tab：
 
 - **`scripts/run_keypoints_openpifpaf.py`**——每一幀跑 OpenPifPaf 的 Apollo-24 關鍵點 model，再用 height-aware 車輛模板比對關鍵點來定位每輛車。有兩種關鍵點↔track 比對策略（`geometric`、`segmentation`），以及三種定位（localizer）策略：`procrustes`（對所有高信心度關鍵點做 closed-form 擬合，一般預設）、`reprojection`（非線性最小平方擬合，更貼近原始像素位置），以及 `wheel_pair`（只用同側前後輪關鍵點——刻意做成最小化的準確度基準，適合只有輪胎清楚可見的情況，或用來跟另外兩種定位法比較）。
-- **`scripts/run_keypoints_carfusion.py`**——用單階段的 CarFusion YOLOv8-Pose model（bbox＋14 個關鍵點）搭配 ByteTrack，達成相同目的、採用不同的關鍵點 model。
 
 完整 CLI 參考（flag、method、localizer、輸出路徑）請見 `AGENTS.md`。
 
@@ -161,10 +160,9 @@ python scripts/run_inference.py --config-name car_heading_smooth --all-pending
 ```bash
 conda activate trafficlab
 python scripts/run_keypoints_openpifpaf.py --video <video_path> --g-proj <g_proj_path> --method geometric
-python scripts/run_keypoints_carfusion.py --video <video_path> --weights models/carfusion_last.pt --g-proj <g_proj_path> --sat <sat_image_path> --out <out_dir>
 ```
 
-軌跡平滑化與靜態軌跡繪圖是獨立的推論後工具，三種定位方法的輸出都適用：
+軌跡平滑化與靜態軌跡繪圖是獨立的推論後工具，兩種定位方法的輸出都適用：
 
 ```bash
 conda activate trafficlab
@@ -192,7 +190,7 @@ python scripts/trajectory_tools.py smooth-and-plot output/example.json.gz --loca
 
 - v1.0：初始版本。
 - v1.1：重構程式碼並修正錯誤。
-- v1.2：新增關鍵點定位（OpenPifPaf 與 CarFusion pipeline，含 `wheel_pair` localizer）作為原生 bbox pipeline 的替代方案；新增獨立的消失點與參考點校正工具；新增校正／幾何診斷檢查工具。
+- v1.2：新增關鍵點定位（OpenPifPaf pipeline，含 `wheel_pair` localizer）作為原生 bbox pipeline 的替代方案；新增獨立的消失點與參考點校正工具；新增校正／幾何診斷檢查工具。
 
 ### 長期願景
 

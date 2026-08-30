@@ -15,7 +15,7 @@
 | YAEN | Yaw 分類 | ✅ 已測試 | 效果差，行車記錄器視角不符 |
 | OpenPifPaf Apollo-24 | Keypoint | ✅ 已測試 | Keypoint 位置準確，偵測率低（2–4 台 vs 15–25 台）；YOLO crop 已實作於 WheelLocalizer |
 | 輪胎定位法（WheelLocalizer） | 幾何 + Keypoint | ✅ 整合進 Pipeline | OpenPifPaf 輪胎 kp → 地面投影 → 幾何中心；偵測率 4.7%，多數 fallback bbox；精度待目視驗證 |
-| YOLOv8 pose CarFusion | Keypoint | 📋 待評估 | 14 個車輛 keypoints，CarFusion 路口視角，有現成 weights |
+| YOLOv8 pose CarFusion | Keypoint | ⛔ 已評估後棄用 | 14 個車輛 keypoints，CarFusion 路口視角；曾短暫整合，後移除（下方分析保留作外部 repo 記錄）|
 | Vehicle_Orientation_Detect | 參考實作 | 🔍 已分析 | 提供「YOLO crop → OpenPifPaf → homography → BEV 角度」完整流程參考 |
 | EgoNet | Monocular 3D | 🔍 已分析 | 根本不適合，side-view keypoint 在俯視角不存在 |
 | BEVHeight / BEVHeight++ | BEV Detection | 🔍 已分析 | 架構最適合，待 GPU 環境測試 |
@@ -638,6 +638,8 @@ BEVHeight++（有 weights，先測）
 ## 待評估
 
 ### YOLOv8 Pose CarFusion（Habib0905/Vehicle-Pose-Estimation）
+
+> 註：曾實作並短暫整合進本專案（`keypoints_carfusion.py` + `run_keypoints_carfusion.py`），後決定棄用、程式碼已移除。以下為原始外部 repo 調查記錄，保留供日後參考。
 
 **Repo**：`Habib0905/Vehicle-Pose-Estimation`  
 **訓練資料**：CarFusion（CVPR 2018，Pittsburgh 路口攝影機）+ 孟加拉交通資料集  
