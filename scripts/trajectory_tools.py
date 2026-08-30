@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trajectory smoothing and plotting CLI for TrafficLab replay outputs."""
+"""Trajectory plotting CLI for TrafficLab replay outputs."""
 
 from __future__ import annotations
 
@@ -105,28 +105,6 @@ def run_scatter(args: argparse.Namespace) -> None:
     print(f"Scatter plot: {output_path}")
 
 
-def run_smooth(args: argparse.Namespace) -> None:
-    from trafficlab.trajectory import smooth_file
-
-    output_path, stats = smooth_file(
-        args.input_path,
-        args.output,
-        selected_ids=_parse_ids(args.ids),
-        window_length=args.window_length,
-        polyorder=args.polyorder,
-        update_sat_center=not args.keep_sat_center,
-    )
-    print(f"Smoothed output: {output_path}")
-    print(
-        "Stats: "
-        f"tracks={stats.total_tracks}, "
-        f"smoothed={stats.smoothed_tracks}, "
-        f"short_skipped={stats.skipped_short_tracks}, "
-        f"invalid_points={stats.skipped_invalid_tracks}, "
-        f"updated_points={stats.updated_points}"
-    )
-
-
 def run_plot(args: argparse.Namespace) -> None:
     from trafficlab.trajectory import TrajectoryPlotter
 
@@ -151,48 +129,6 @@ def run_plot(args: argparse.Namespace) -> None:
         zoom_margin_px=args.zoom_margin,
     )
     print(f"Trajectory plot: {output_path}")
-
-
-def run_smooth_and_plot(args: argparse.Namespace) -> None:
-    from trafficlab.trajectory import TrajectoryPlotter, smooth_file
-
-    smoothed_path, stats = smooth_file(
-        args.input_path,
-        args.output,
-        selected_ids=_parse_ids(args.ids),
-        window_length=args.window_length,
-        polyorder=args.polyorder,
-        update_sat_center=not args.keep_sat_center,
-    )
-    plot_output = Path(args.plot_output) if args.plot_output else _default_plot_output(smoothed_path)
-    plotter = TrajectoryPlotter.from_file(
-        smoothed_path,
-        location_code=args.location_code,
-        satellite_image_path=args.sat_image,
-    )
-    plot_path = plotter.plot(
-        plot_output,
-        selected_ids=_parse_ids(args.ids),
-        zoom_to_fit=args.zoom_to_fit,
-        show_heading_arrows=args.show_heading_arrows,
-        show_id_labels=args.show_id_labels,
-        show_keypoints=args.show_keypoints,
-        keypoint_trajectory_names=_parse_kp_names(args.keypoint_trajectories),
-        skip_out_of_bounds=not args.include_out_of_bounds,
-        title=args.title,
-        min_points=args.min_points,
-        zoom_margin_px=args.zoom_margin,
-    )
-    print(f"Smoothed output: {smoothed_path}")
-    print(
-        "Stats: "
-        f"tracks={stats.total_tracks}, "
-        f"smoothed={stats.smoothed_tracks}, "
-        f"short_skipped={stats.skipped_short_tracks}, "
-        f"invalid_points={stats.skipped_invalid_tracks}, "
-        f"updated_points={stats.updated_points}"
-    )
-    print(f"Trajectory plot: {plot_path}")
 
 
 def run_frames(args: argparse.Namespace) -> None:
@@ -236,7 +172,7 @@ def run_frames(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Smooth and plot TrafficLab replay trajectories without mixing external scripts."
+        description="Plot TrafficLab replay trajectories over a satellite image."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -248,38 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
     scatter.add_argument("--title", help="Optional plot title.")
     scatter.set_defaults(func=run_scatter)
 
-    smooth = subparsers.add_parser("smooth", help="Smooth sat_coords in a replay JSON file.")
-    smooth.add_argument("input_path", help="Input .json or .json.gz replay file.")
-    smooth.add_argument("-o", "--output", help="Output .json or .json.gz path.")
-    smooth.add_argument("--ids", help="Comma-separated tracked_id values to smooth.")
-    smooth.add_argument("--window-length", type=int, default=45, help="Odd Savitzky-Golay window.")
-    smooth.add_argument("--polyorder", type=int, default=3, help="Savitzky-Golay polynomial order.")
-    smooth.add_argument(
-        "--keep-sat-center",
-        action="store_true",
-        help="Do not mirror smoothed sat_coords into sat_center.",
-    )
-    smooth.set_defaults(func=run_smooth)
-
     plot = subparsers.add_parser("plot", help="Plot trajectories over a satellite image.")
     plot.add_argument("input_path", help="Input .json or .json.gz replay file.")
     plot.add_argument("-o", "--output", help="Output PNG path.")
     add_common_plot_args(plot)
     plot.set_defaults(func=run_plot)
-
-    both = subparsers.add_parser("smooth-and-plot", help="Smooth trajectories, then plot the result.")
-    both.add_argument("input_path", help="Input .json or .json.gz replay file.")
-    both.add_argument("-o", "--output", help="Smoothed output .json or .json.gz path.")
-    both.add_argument("--plot-output", help="Output PNG path.")
-    both.add_argument("--window-length", type=int, default=45, help="Odd Savitzky-Golay window.")
-    both.add_argument("--polyorder", type=int, default=3, help="Savitzky-Golay polynomial order.")
-    both.add_argument(
-        "--keep-sat-center",
-        action="store_true",
-        help="Do not mirror smoothed sat_coords into sat_center.",
-    )
-    add_common_plot_args(both)
-    both.set_defaults(func=run_smooth_and_plot)
 
     frames = subparsers.add_parser(
         "frames",

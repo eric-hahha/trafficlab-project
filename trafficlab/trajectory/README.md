@@ -7,9 +7,8 @@ standalone conda project were intentionally not copied into this repository.
 ## Structure
 
 - `io.py`: shared `.json` / `.json.gz` loading, writing, and path resolution helpers.
-- `smoothing.py`: Savitzky-Golay smoothing for `sat_coords`, grouped by `tracked_id`.
 - `plotting.py`: satellite-background trajectory plotting with optional zoom and heading arrows.
-- `scripts/trajectory_tools.py`: command-line entry point for smoothing, plotting, or both.
+- `scripts/trajectory_tools.py`: command-line entry point for plotting (`plot`), per-frame PNGs (`frames`), and scatter plots (`scatter`).
 
 ## Usage
 
@@ -17,9 +16,9 @@ Run commands from the repository root with the `trafficlab` conda environment ac
 
 ```bash
 source /opt/anaconda3/bin/activate trafficlab
-python scripts/trajectory_tools.py smooth output/example.json.gz
-python scripts/trajectory_tools.py plot output/example.smoothed.json.gz --location-code test1
-python scripts/trajectory_tools.py smooth-and-plot output/example.json.gz --ids 7,373 --zoom-to-fit
+python scripts/trajectory_tools.py plot output/example.json.gz --location-code test1
+python scripts/trajectory_tools.py plot output/example.json.gz --ids 7,373 --zoom-to-fit
+python scripts/trajectory_tools.py frames output/example.json.gz --out-dir frames_out --ids 7,373
 ```
 
 If the input file does not contain `location_code` metadata, pass `--location-code` or
@@ -50,9 +49,8 @@ The tools accept the standard TrafficLab replay format:
 }
 ```
 
-The plotter also accepts a top-level frame list, but smoothing expects objects to have
-`tracked_id` and `sat_coords`. Plotting skips tracks with fewer than 5 points by default;
-override this with `--min-points` if needed. It also skips tracks that are completely
-outside the satellite image by default; use `--include-out-of-bounds` to include them.
-Use `--show-id-labels` to draw same-color `tracked_id` labels next to visible tracks.
-Tracks shorter than `--window-length` are left unchanged during smoothing.
+The plotter also accepts a top-level frame list. Plotting skips tracks with fewer than 5
+points by default; override this with `--min-points` if needed. It also skips tracks that
+are completely outside the satellite image by default; use `--include-out-of-bounds` to
+include them. Use `--show-id-labels` to draw same-color `tracked_id` labels next to
+visible tracks.

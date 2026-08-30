@@ -71,7 +71,7 @@ TrafficLab-3D/
 │   ├── visualization/           # replay 載入與渲染
 │   ├── io/                      # replay/config I/O 輔助工具
 │   ├── motion/                  # 運動學（kinematics）工具
-│   └── trajectory/              # 推論後的軌跡平滑化與靜態繪圖工具
+│   └── trajectory/              # 推論後的軌跡靜態繪圖工具
 ├── scripts/                     # CLI 輔助工具與維護用工具
 ├── location/<location_code>/    # 校正資產、衛星／CCTV 影像、投影檔案與影片素材
 ├── output/                      # 產生出來的 model/tracker/config/location replay 輸出結果
@@ -292,36 +292,13 @@ source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools
 source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py --help
 ```
 
-### 8. 軌跡平滑化
-
-只涵蓋 `smooth`（與其合併捷徑 `smooth-and-plot`）：
-
-```bash
-source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth <replay_json_path>
-```
-
-| Flag | 說明 |
-|---|---|
-| `-o`/`--output` | 覆寫輸出路徑；預設 `<stem>.smoothed.json[.gz]`，存在輸入檔旁邊 |
-| `--window-length` | Savitzky-Golay 窗口長度；短於這個長度的 track 不會被改動 |
-
-平滑化用 Savitzky-Golay 濾波、依 `tracked_id` 分組。
-
-要平滑化＋繪圖一次做完：
-
-```bash
-source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools.py smooth-and-plot <replay_json_path> [smooth flags] [plot flags]
-```
-
-flag 是 `smooth` 與上一節「軌跡繪圖」`plot` 的合集，繪圖相關 flag 見上一節。
-
-### 9. 對 script 做語法檢查
+### 8. 對 script 做語法檢查
 
 ```bash
 source /opt/anaconda3/bin/activate trafficlab && python -m py_compile scripts/run_inference.py
 ```
 
-### 10. 車輛模板 GCP 校正工具
+### 9. 車輛模板 GCP 校正工具
 
 獨立的 GUI 工具，把「方向 4：車輛模板作為 PnP GCP」跟「方向 7：多參考物最小二乘法」接在一起：在 CCTV 畫面上點 2 個輪胎接地點，工具用既有 ground homography 把車輛 CAD 模板（24 個關鍵點）套上正確的 sat 位置、朝向與大小，再跟該幀 replay JSON 的 `kp_cctv` 配對，產生多組「頭點像素＋腳點真實位置＋真實高度」參考點，餵給跟方向 7 完全共用的 `trafficlab.projection.reference_point_calibration.calibrate()` 解出 `cam_sat_xy`/`z_cam_meters`。完整使用步驟（5 個分頁）、設計細節與常見問題見 `docs/car-template-calibration-tool-guide.md`。
 
@@ -344,7 +321,7 @@ python scripts/car_template_calibration_tool.py \
 
 核心程式碼：`trafficlab/projection/car_template_placement.py`（模板數學，純 numpy）、`trafficlab/gui/tools/car_template_calibration_tool.py`（GUI 本體）；共用 `trafficlab/projection/reference_point_calibration.py` 的 `calibrate()`，以及「5. 驗證」tab 用到的 `trafficlab/projection/parallax_reprojection.py`。
 
-### 11. 多參考物最小二乘校正工具
+### 10. 多參考物最小二乘校正工具
 
 獨立的 GUI 工具，實作方向 7（多參考物最小二乘法）：蒐集 N 個（N ≥ 2）已知真實高度的參考物件的頭／腳像素座標，套用非線性最小二乘同時解出相機的 sat 平面位置（`cam_sat_xy`）與高度（`z_cam_meters`）——是現有 `pars_stage.py` 兩物件手動標定法的推廣，參考物件數量從固定 2 個放寬到任意多個，數學模型相同。完整使用步驟（4 個分頁）與常見問題見 `docs/reference-point-calibration-tool-guide.md`。
 
@@ -367,7 +344,7 @@ python scripts/reference_point_calibration_tool.py \
 
 核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/projection/parallax_reprojection.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
 
-### 12. CCTV 影格選取工具
+### 11. CCTV 影格選取工具
 
 獨立的 GUI 工具，用來從 location 的 footage 裡挑一幀存成 `location/<location_code>/cctv_<location_code>.png`。下拉選單先選 location（只列出 `footage/` 底下有 `.mp4` 的 location），再選該 location 的某支影片；可播放／暫停、上一幀／下一幀，或拖曳 slider／輸入 spinbox 跳到指定幀。輸出圖片維持原影片的寬高，不做任何縮放。
 
@@ -423,7 +400,7 @@ output/model-<model_name>_tracker-<tracker_name>/<config_name>/<location_code>/*
 ```
 
 - `tracked_id` 用來連接跨幀的同一個物件。
-- `sat_coords` 是平滑化與繪圖使用的標準衛星座標點。
+- `sat_coords` 是繪圖使用的標準衛星座標點。
 - 當某個工具刻意移動衛星座標點時，`sat_center` 應該同步更新為 `sat_coords`。
 - `class` 對繪圖來說是選填的，但對摘要與過濾很有用。
 - `.json.gz` 是推論輸出的標準儲存格式；工具應該要保留 gzip 支援。
@@ -446,7 +423,7 @@ source /opt/anaconda3/bin/activate trafficlab && python scripts/trajectory_tools
 
 ## 產生檔案與 Git 衛生守則
 
-- 預設輸出放進 `output/`；只有純語法檢查／smoke-test 這類用後即丟的產出，才寫到 `/private/tmp`。驗證軌跡工具的改動時，省略 `-o`/`--output`/`--plot-output`，讓輸出留在預設路徑（輸入 JSON 旁邊）就好。
+- 預設輸出放進 `output/`；只有純語法檢查／smoke-test 這類用後即丟的產出，才寫到 `/private/tmp`。驗證軌跡工具的改動時，省略 `-o`/`--output`，讓輸出留在預設路徑（輸入 JSON 旁邊）就好。
 - 回報完成之前，先檢查 `git status --short`，把自己的變更和使用者原本就有的變更區分開來。
 - 絕對不要還原使用者無關的變更。
 

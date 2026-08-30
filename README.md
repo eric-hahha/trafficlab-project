@@ -39,7 +39,7 @@ TrafficLab-3D/
 │   ├── motion/                           （OpenPifPaf 關鍵點定位邏輯、運動學）
 │   ├── projection/                       （G-projection、SVG、消失點與參考點校正）
 │   ├── diagnostics/                      （校正／幾何驗證用的診斷腳本邏輯）
-│   ├── trajectory/                       （推論後的軌跡平滑化與靜態繪圖）
+│   ├── trajectory/                       （推論後的軌跡靜態繪圖）
 │   ├── visualization/                    （replay 載入與渲染）
 │   └── io/                               （replay/config I/O 輔助工具）
 │
@@ -162,14 +162,14 @@ conda activate trafficlab
 python scripts/run_keypoints_openpifpaf.py --video <video_path> --g-proj <g_proj_path> --method geometric
 ```
 
-軌跡平滑化與靜態軌跡繪圖是獨立的推論後工具，兩種定位方法的輸出都適用：
+靜態軌跡繪圖是獨立的推論後工具，兩種定位方法的輸出都適用：
 
 ```bash
 conda activate trafficlab
-python scripts/trajectory_tools.py smooth-and-plot output/example.json.gz --location-code test1
+python scripts/trajectory_tools.py plot output/example.json.gz --location-code test1
 ```
 
-實作放在 `trafficlab/trajectory/`，讓平滑化、繪圖、JSON I/O 的程式碼跟 GUI、推論 pipeline 分開維護，細節請見 `trafficlab/trajectory/README.md`。
+實作放在 `trafficlab/trajectory/`，讓繪圖、JSON I/O 的程式碼跟 GUI、推論 pipeline 分開維護，細節請見 `trafficlab/trajectory/README.md`。
 
 在這個 [Google Drive](https://drive.google.com/drive/folders/14NVnbrUUfII3tRdI8OOEPnLzKbs3SPvn?usp=sharing) 裡可以找到：
 
