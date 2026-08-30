@@ -118,8 +118,6 @@ OpenPifPaf 對整張影像偵測，不經過 YOLO tracker，輸出的 `tracked_i
 3. 與 YOLO bbox 做 IoU 配對（預設閾值 0.3，`--iou-threshold`），指派 YOLO track ID；沒配對到的偵測給一個當幀內的合成 id（非跨幀追蹤，只為了畫圖時顏色能區分）
 4. 只有一個信心關鍵點、bbox IoU 天生算不出來的偵測碎片，如果那個點剛好落在唯一一個 YOLO 框內，會被吸收合併進同一幀已配對到那個 track 的偵測，補上更多關鍵點
 
-`--method crop`（crop-and-redetect）是另一條互斥路徑：裁切 Pass-1 bbox 加 50% padding 後重新偵測，不做 YOLO IoU 配對。
-
 `kp_bbox_xyxy()` / `match_by_bbox_iou()`（`keypoints_openpifpaf.py` 模組層級的公開版本）跟這裡實際用的邏輯是重複的兩份程式碼——`run_keypoints_openpifpaf.py` 用的是自己內部 `_` 開頭的版本，公開版本目前沒有呼叫者。
 
 ---

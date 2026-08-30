@@ -4,11 +4,9 @@ Run h-aware 3D keypoint localization and output a TrafficLab replay JSON.
 Identical detection loop to eval_haware.py, but writes a .json.gz in the
 standard TrafficLab replay format so results can be loaded in the GUI.
 
---method selects one of three mutually exclusive per-frame strategies:
+--method selects one of two mutually exclusive per-frame strategies:
     geometric     Bridge PifPaf detections to YOLO track IDs via bbox IoU.
                   Reads --yolo / --yolo-classes / --yolo-conf / --iou-threshold.
-    crop          Crop each Pass-1 bbox and re-run PifPaf on the crop to recover
-                  more confident keypoints. Reads --crop-redetect / --crop-padding.
     segmentation  Merge PifPaf fragments that belong to the same vehicle using
                   car-segmenter instance masks instead of a bbox-IoU heuristic —
                   fixes cases geometric's single-keypoint recovery can't (two
@@ -265,19 +263,12 @@ def main():
                         help='PifPaf instance score threshold (default 0.01)')
     parser.add_argument('--seed-threshold',   type=float, default=0.01,
                         help='PifPaf CIF seed threshold (default 0.01)')
-    parser.add_argument('--method', required=True, choices=['geometric', 'crop', 'segmentation'],
+    parser.add_argument('--method', required=True, choices=['geometric', 'segmentation'],
                         help='geometric = bridge to YOLO track IDs via bbox IoU '
                              '(reads --yolo*/--iou-threshold); '
-                             'crop = crop-and-redetect for better keypoints '
-                             '(reads --crop-redetect/--crop-padding); '
                              'segmentation = merge PifPaf fragments via car-segmenter '
                              'instance masks (reads --seg-*). Mutually exclusive: '
                              'only the selected strategy runs.')
-    parser.add_argument('--crop-redetect', action='store_true',
-                        help='Crop each Pass-1 bbox with 50%% padding and re-run PifPaf '
-                             '(only takes effect when --method crop)')
-    parser.add_argument('--crop-padding', type=float, default=0.5,
-                        help='Fractional padding around bbox for crop-and-redetect crop (default 0.5)')
     # geometric matching: YOLO track-ID matching (only when --method geometric)
     parser.add_argument('--yolo',          default='models/best.pt',
                         help='YOLO model path/name for track-ID matching (default: models/best.pt, '
@@ -332,9 +323,6 @@ def main():
     if args.method == 'geometric' and not args.yolo and not args.yolo_boxes_json:
         print('[haware] --method geometric but --yolo is empty: no track-ID matching '
               'will happen, tracked_id will be null for every detection.')
-    if args.method == 'crop' and not args.crop_redetect:
-        print('[haware] --method crop but --crop-redetect was not passed: no re-detection '
-              'will happen, this run is equivalent to plain Pass-1 PifPaf.')
 
     # --- G projection ---
     g_proj_dir = os.path.dirname(os.path.abspath(args.g_proj))
@@ -475,8 +463,6 @@ def main():
         }
     elif args.method == 'geometric':
         detector_info = {'source': None}
-    elif args.method == 'crop':
-        detector_info = {'crop_redetect': args.crop_redetect, 'crop_padding': args.crop_padding}
     elif seg_records_by_frame is not None:
         detector_info = {
             'source': 'replay', 'path': args.seg_masks_json,
@@ -727,28 +713,9 @@ def main():
             for j, ann in enumerate(predictions):
                 n_det += 1
 
-                # crop-and-redetect (--method crop only): crop around Pass-1 bbox and re-detect
                 # kp_override (--method geometric only): use the merged keypoints when this
                 # detection absorbed a stray single-keypoint match (see geometric matching above)
                 kp_24 = kp_override.get(j, ann.data)
-                if args.method == 'crop' and args.crop_redetect:
-                    bx, by, bw, bh = ann.bbox()
-                    pad_x, pad_y = bw * args.crop_padding, bh * args.crop_padding
-                    x0 = max(0, int(bx - pad_x))
-                    y0 = max(0, int(by - pad_y))
-                    x1 = min(W, int(bx + bw + pad_x))
-                    y1 = min(H, int(by + bh + pad_y))
-                    if x1 > x0 and y1 > y0:
-                        try:
-                            crop_preds, _, _ = predictor.pil_image(pil.crop((x0, y0, x1, y1)))
-                        except Exception:
-                            crop_preds = []
-                        if crop_preds:
-                            best = max(crop_preds,
-                                       key=lambda a: sum(1 for kp in a.data if kp[2] >= args.kp_conf))
-                            kp_24 = best.data.copy()
-                            kp_24[:, 0] += x0
-                            kp_24[:, 1] += y0
 
                 bbox_2d = bbox_2d_list[j]
                 obj, status = _localize_and_assemble(

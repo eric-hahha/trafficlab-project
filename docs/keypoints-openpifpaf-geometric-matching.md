@@ -5,7 +5,7 @@
 OpenPifPaf 對整張影像偵測，不經過任何 tracker，所以 h-aware 輸出的 `tracked_id` 欄位原本全為 `null`。
 Geometric matching（原稱 Method B）用 bbox IoU 橋接：讓 YOLO tracker 同幀偵測，再把 YOLO 的 `track_id` 指派給 PifPaf 偵測結果。
 
-`run_keypoints_openpifpaf.py` 現在有 `--method {geometric,crop}` 二選一（互斥）：本文件講的是 `--method geometric` 這條路徑；另一條 `--method crop`（crop-and-redetect，原稱 two-pass，裁切 Pass-1 bbox 重新偵測以取得更多信心關鍵點）不在本文件範圍內。
+`run_keypoints_openpifpaf.py` 的 `--method` 有 `geometric` / `segmentation` 二選一（互斥）：本文件講的是 `--method geometric` 這條路徑；`--method segmentation`（用 car-segmenter instance mask 合併 PifPaf 碎片）不在本文件範圍內。
 
 涉及檔案：
 - `scripts/run_keypoints_openpifpaf.py` — 主要實作
@@ -17,7 +17,7 @@ Geometric matching（原稱 Method B）用 bbox IoU 橋接：讓 YOLO tracker �
 ## 目前預設值
 
 ```
---method          geometric           （必填，二選一；crop 模式下 YOLO 完全不會載入）
+--method          geometric           （必填，二選一）
 --yolo            models/best.pt      （VisDrone classes，car=3；空字串可關閉 YOLO 配對）
 --yolo tracker    bytetrack.yaml      （顯式指定；ultralytics 套件本身的預設是 botsort.yaml，不指定就是 BoT-SORT）
 --pifpaf-threshold 0.01

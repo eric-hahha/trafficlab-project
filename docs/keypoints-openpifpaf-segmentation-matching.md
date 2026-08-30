@@ -64,7 +64,7 @@ merge_keypoints_by_group：group_of 相同（非 None）的 annotation 合併成
 ## 目前預設值
 
 ```
---method     segmentation   （必填，三選一之一）
+--method     segmentation   （必填，二選一之一）
 --seg-model  models/yolo11m-seg.pt （首次執行自動下載到這個路徑，需要網路）
 --seg-conf   0.3
 --seg-device None（交給 ultralytics 自動選擇 cuda/mps/cpu）

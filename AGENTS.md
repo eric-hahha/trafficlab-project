@@ -126,14 +126,14 @@ source /opt/anaconda3/bin/activate trafficlab && python postprocess.py --help
 
 ### 4. keypoints-openpifpaf
 
-在每一幀上執行 OpenPifPaf Apollo-24 偵測，並透過 height-aware 關鍵點模板比對來定位每輛車。輸出是標準的 TrafficLab replay JSON，可以在 GUI 中載入（衛星座標位置、車頭朝向、車輛外框，以及 CCTV 關鍵點疊圖）。`--method` 是必填參數，用來選擇三種互斥的逐幀策略之一 — 只有被選中策略自己的 flag 才會生效。
+在每一幀上執行 OpenPifPaf Apollo-24 偵測，並透過 height-aware 關鍵點模板比對來定位每輛車。輸出是標準的 TrafficLab replay JSON，可以在 GUI 中載入（衛星座標位置、車頭朝向、車輛外框，以及 CCTV 關鍵點疊圖）。`--method` 是必填參數，用來選擇兩種互斥的逐幀策略之一 — 只有被選中策略自己的 flag 才會生效。
 
 ```bash
 source /opt/anaconda3/bin/activate trafficlab && \
 PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
   --video <video_path> \
   --g-proj <g_proj_path> \
-  --method <geometric|crop|segmentation>
+  --method <geometric|segmentation>
 ```
 
 輸出：`output/haware/<location_code>/<video_stem>.json.gz` — 但 `--localizer wheel_pair` 例外，會寫到 `output/wheel_pair/<location_code>/<video_stem>.json.gz`（獨立資料夾，避免跟同一支影片的 `procrustes`/`reprojection` 輸出互相覆蓋）。
@@ -143,7 +143,6 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | Method | 何時選它 | 相關 flag |
 |--------|---------------|-----------------|
 | `geometric` | 沒有明顯 PifPaf instance-splitting 時，用 bbox IoU 把關鍵點對到 YOLO track id | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
-| `crop` | 想從裁切圖重跑 PifPaf、找回更多高信心度關鍵點時用 | `--crop-redetect` / `--crop-padding` |
 | `segmentation` | PifPaf 把同一台車拆成兩塊多關鍵點碎片、`geometric` 修不了時用 — 詳見 `docs/keypoints-openpifpaf-segmentation-matching.md` | `--seg-model` / `--seg-conf` / `--seg-device` |
 
 共用選項：
@@ -170,13 +169,6 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | `--iou-threshold` | `0.3` | 接受 PifPaf↔YOLO 比對所需的最小 bbox IoU |
 | `--yolo-boxes-json` | *(無)* | 使用預先算好的 replay JSON（例如 `pipeline.py` 的輸出）作為 YOLO box 來源，而不是即時跑 model；設定時優先於 `--yolo` |
 | `--yolo-boxes-class` | `car` | `--yolo-boxes-json` 中要視為汽車的 `class` 值 |
-
-`--method crop` 選項：
-
-| Flag | 預設值 | 說明 |
-|------|---------|-------|
-| `--crop-redetect` | 關閉 | 以 50% padding 裁切每個 Pass-1 bbox 並重新跑 PifPaf；沒有這個 flag 時，`--method crop` 等同於單純的 Pass-1 PifPaf |
-| `--crop-padding` | `0.5` | 裁切時 bbox 周圍的 padding 比例 |
 
 `--method segmentation` 選項：
 

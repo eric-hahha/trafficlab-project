@@ -123,7 +123,7 @@ Inference Tab 是管理所有輸出 JSON 檔的地方，這些檔案就是視覺
 
 當畫面沒辦法逐幀取得乾淨、未遮蔽的 bounding box 輪廓時，TrafficLab 也提供兩套關鍵點定位 pipeline，透過 CLI 執行，輸出的 replay JSON 跟其他方法一樣可以直接載入 Visualization Tab：
 
-- **`scripts/run_keypoints_openpifpaf.py`**——每一幀跑 OpenPifPaf 的 Apollo-24 關鍵點 model，再用 height-aware 車輛模板比對關鍵點來定位每輛車。有三種關鍵點↔track 比對策略（`geometric`、`crop`、`segmentation`），以及三種定位（localizer）策略：`procrustes`（對所有高信心度關鍵點做 closed-form 擬合，一般預設）、`reprojection`（非線性最小平方擬合，更貼近原始像素位置），以及 `wheel_pair`（只用同側前後輪關鍵點——刻意做成最小化的準確度基準，適合只有輪胎清楚可見的情況，或用來跟另外兩種定位法比較）。
+- **`scripts/run_keypoints_openpifpaf.py`**——每一幀跑 OpenPifPaf 的 Apollo-24 關鍵點 model，再用 height-aware 車輛模板比對關鍵點來定位每輛車。有兩種關鍵點↔track 比對策略（`geometric`、`segmentation`），以及三種定位（localizer）策略：`procrustes`（對所有高信心度關鍵點做 closed-form 擬合，一般預設）、`reprojection`（非線性最小平方擬合，更貼近原始像素位置），以及 `wheel_pair`（只用同側前後輪關鍵點——刻意做成最小化的準確度基準，適合只有輪胎清楚可見的情況，或用來跟另外兩種定位法比較）。
 - **`scripts/run_keypoints_carfusion.py`**——用單階段的 CarFusion YOLOv8-Pose model（bbox＋14 個關鍵點）搭配 ByteTrack，達成相同目的、採用不同的關鍵點 model。
 
 完整 CLI 參考（flag、method、localizer、輸出路徑）請見 `AGENTS.md`。

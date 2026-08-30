@@ -66,7 +66,7 @@ python scripts/build_cad_keypoint_template.py --input <blender_keypoints_raw.jso
 
 ```bash
 python scripts/run_keypoints_openpifpaf.py \
-  --video <video_path> --g-proj <g_proj_path> --method <geometric|crop|segmentation> \
+  --video <video_path> --g-proj <g_proj_path> --method <geometric|segmentation> \
   --cad-template cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json
 ```
 
