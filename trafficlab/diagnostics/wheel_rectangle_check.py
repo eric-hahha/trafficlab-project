@@ -18,15 +18,7 @@ import statistics
 from pathlib import Path
 from typing import Iterator, Optional
 
-# Apollo-24 keypoint indices; matches KEYPOINT_NAMES in
-# scripts/plot_reprojection_keypoints.py and KP_NAMES in
-# trafficlab/motion/keypoints_openpifpaf.py.
-WHEEL_KP = {
-    "front_wheel_left": 7,
-    "rear_wheel_left": 8,
-    "rear_wheel_right": 18,
-    "front_wheel_right": 19,
-}
+from trafficlab.motion.keypoints_openpifpaf import WHEEL_KP
 
 # Edges of the wheel rectangle, named by the metric they represent.
 EDGES = {

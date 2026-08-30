@@ -32,8 +32,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from trafficlab.diagnostics.wheel_rectangle_check import WHEEL_KP
-from trafficlab.motion.keypoints_openpifpaf import KP_NAMES
+from trafficlab.motion.keypoints_openpifpaf import KP_NAMES, WHEEL_KP
 
 # Wheels plus front-door-top corners: the keypoints most reliably visible
 # (and least prone to perspective/parallax wobble) even when a wheel_pair

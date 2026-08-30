@@ -207,6 +207,19 @@ KP_NAMES = [
 ]
 
 
+# Friendly name -> KP_NAMES index for the four wheel-center keypoints. These
+# carry template height h=0 (GProjection.cctv_to_sat applies no parallax
+# correction to them), which makes them the reference wheels for the
+# wheel_pair localizer / trajectory correction and the wheel-rectangle
+# diagnostic alike.
+WHEEL_KP = {
+    'front_wheel_left':  KP_NAMES.index('front_wheel_center_left'),
+    'rear_wheel_left':   KP_NAMES.index('rear_wheel_center_left'),
+    'rear_wheel_right':  KP_NAMES.index('rear_wheel_center_right'),
+    'front_wheel_right': KP_NAMES.index('front_wheel_center_right'),
+}
+
+
 # ---------------------------------------------------------------------------
 # Keypoint pair tables for the geometric centerline-intersection localizer
 # (localize_reprojection). Indices per build_car_template's Apollo-24 layout.
