@@ -30,8 +30,8 @@ from trafficlab.trajectory.io import (
     resolve_satellite_image_path,
 )
 
-# ApolloCar3D 24-keypoint order (matches scripts/eval_openpifpaf.py KEYPOINT_NAMES
-# and the p_sat / kp_sat index used by trafficlab/motion/keypoints_openpifpaf.py).
+# ApolloCar3D 24-keypoint order (matches KP_NAMES / the p_sat / kp_sat index
+# used by trafficlab/motion/keypoints_openpifpaf.py).
 KEYPOINT_NAMES = [
     'front_glass_top_right', 'front_glass_top_left', 'front_light_right', 'front_light_left',
     'front_low_fog_light_right', 'front_low_fog_light_left', 'front_door_top_left', 'front_wheel_center_left',

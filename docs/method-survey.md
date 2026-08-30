@@ -106,7 +106,6 @@ wheel_localization:
 **已知問題**：
 - 偵測率 4.7% 遠低於可用門檻，多數偵測仍走 bbox fallback
 - crop 可能包含鄰近車輛的輪胎（背景污染），待修正：過濾座標落在 bbox 外的 kp
-- `eval_openpifpaf.py` 的 heading arrow 仍在影像座標系計算，待修正至 sat 座標系
 
 **比較推論執行記錄**（`test21-2.mp4`，`inference_config_test.yaml`，2026-06-10）：
 - bbox 模式（`slight_smoothing_default`）：`output/model-best_tracker-default/slight_smoothing_default/test21/test21-2.json.gz`
@@ -249,7 +248,7 @@ kp0–3 順序由 scene_0 視覺化確認；kp2/kp3 為交叉順序（非直觀�
 
 **Repo**：`openpifpaf/openpifpaf` + `openpifpaf_plugin_apollocar3d`  
 **訓練資料**：ApolloCar3D（百度 Apollo 街道影像，24個車輛 keypoints）  
-**相關檔案**：`scripts/eval_openpifpaf.py`  
+**相關檔案**：`scripts/run_keypoints_openpifpaf.py`、`trafficlab/motion/keypoints_openpifpaf.py`  
 **安裝**：`pip install openpifpaf`（trafficlab env 已裝，torch 2.2.2 相容）
 
 **架構**：ShuffleNetV2k16 backbone + PifPaf fields，端對端輸出每台車 24 個 keypoints + confidence。
@@ -287,7 +286,7 @@ Heading 計算用**水平配對**（左右對稱點，共 12 組），連線方�
 - 箭頭方向不可靠（待修正）
 - 部分車輛只偵測到單側（例如側面朝相機），水平配對失敗，無箭頭（預期行為）
 
-**已完成的後續工作**：YOLO crop → OpenPifPaf 已實作於 `WheelLocalizer`（見下方輪胎定位法章節）；heading 計算改在 sat 座標系尚未修正（`eval_openpifpaf.py` 仍在影像座標系算角度）。
+**已完成的後續工作**：YOLO crop → OpenPifPaf 已實作於 `WheelLocalizer`（見下方輪胎定位法章節）；h-aware 定位改由 `scripts/run_keypoints_openpifpaf.py` 在 sat 座標系計算 heading。
 
 **能否用 SKoPe3D 訓練 OpenPifPaf？**
 
@@ -740,7 +739,6 @@ BEVHeight++（有 weights，先測）
 | `scripts/archive/eval_bbox_heading.py` | Bbox 方向視覺化評估 |
 | `scripts/eval_pirazh.py` | Pirazh keypoint 視覺化評估 |
 | `scripts/eval_yaen.py` | YAEN 朝向評估 |
-| `scripts/eval_openpifpaf.py` | OpenPifPaf keypoint 評估 |
 | `scripts/finetune_pirazh.py` | Pirazh fine-tune（SKoPe3D） |
 | `models/best_fine_kp_checkpoint.pth.tar` | Pirazh Stage 2 checkpoint |
 | `models/car_car_part_model.pt` | YAEN 零件偵測器 |
