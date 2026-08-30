@@ -103,7 +103,7 @@ python scripts/car_template_calibration_tool.py \
 
 ### 5.「驗證」tab
 
-視覺化比較「修正前」跟「修正後」兩份 `G_projection` 在同一幀、同一批 `kp_cctv` 偵測下的 parallax correction 疊圖，沿用既有的 `trafficlab.diagnostics.parallax_correction_check`（`compute_frame_records`／`compute_view_extent`／`plot_frame_pre_post_keypoints`），這個工具沒有修改那支模組本身。不影響「確認」／「結果」tab 已經算出的結果，純粹是輔助判斷用的視覺化。
+視覺化比較「修正前」跟「修正後」兩份 `G_projection` 在同一幀、同一批 `kp_cctv` 偵測下的 parallax correction 疊圖，沿用既有的 `trafficlab.projection.parallax_reprojection`（`compute_frame_records`／`compute_view_extent`／`plot_frame_pre_post_keypoints`），這個工具沒有修改那支模組本身。不影響「確認」／「結果」tab 已經算出的結果，純粹是輔助判斷用的視覺化。
 
 | 欄位 | 預設值 | 說明 |
 |---|---|---|
@@ -141,7 +141,7 @@ python scripts/car_template_calibration_tool.py \
 |------|------|
 | `trafficlab/projection/car_template_placement.py` | 核心數學（`CarTemplate`、`TemplatePose`、`fit_two_point_pose`、`apply_pose_to_points`/`apply_pose_to_template`、`scaled_heights_m`、`anchor_fit_report`、`build_reference_points`），純 numpy，不依賴 Qt，也不依賴 `trafficlab.motion`；`if __name__ == "__main__"` 有一個不依賴 replay JSON/GProjection 的 self-test，含 body↔sat 手性的斷言 |
 | `trafficlab/projection/reference_point_calibration.py` | 方向 7 的核心數學（`ReferencePoint`、`calibrate`）——這個工具新增了 `foot_sat` 欄位，其餘完全共用不變 |
-| `trafficlab/diagnostics/parallax_correction_check.py` | 「5. 驗證」tab 疊圖比較機制的來源，這個工具沒有修改它 |
+| `trafficlab/projection/parallax_reprojection.py` | 「5. 驗證」tab 疊圖比較機制的來源，這個工具沒有修改它 |
 | `trafficlab/gui/tools/car_template_calibration_tool.py` | GUI 本體 |
 | `scripts/car_template_calibration_tool.py` | 啟動腳本 |
 | [docs/height-correction-algorithm-survey.md](height-correction-algorithm-survey.md) | 方向 4 的背景、跟原始 PnP 構想的差異、跟其他高度校正方案的比較 |

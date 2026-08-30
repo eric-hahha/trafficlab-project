@@ -254,7 +254,7 @@ class SatRenderer:
             painter.drawText(box, Qt.AlignCenter, label)
 
     # --- Parallax-correction pre/post overlay ---
-    # Mirrors trafficlab/diagnostics/parallax_correction_check.py's matplotlib
+    # Mirrors trafficlab/projection/parallax_reprojection.py's matplotlib
     # plot_frame_pre_post_keypoints, rendered with QPainter so a whole video can
     # be batch-exported instead of one matplotlib figure per frame. `records`
     # is compute_frame_records(...)'s output: [{"tracked_id", "class", "pairs":

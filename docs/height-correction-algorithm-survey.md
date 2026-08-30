@@ -224,6 +224,6 @@ $$F - O = (G - O)\cdot\frac{z_{\text{cam}} - h}{z_{\text{cam}}}$$
 |------|------|
 | `trafficlab/projection/g_projection.py` | 現有高度校正實作，`_init_parallax`/`parallax_correct_ground_to_real` |
 | `trafficlab/gui/tabs/calibration_stage/pars_stage.py` | 現有的兩物件頭腳點手動標定 UI |
-| `trafficlab/diagnostics/parallax_correction_check.py` | 校正前後（pre/post）視差位移診斷工具 |
+| `trafficlab/projection/parallax_reprojection.py` | 校正前後（pre/post）視差位移診斷工具 |
 | `docs/keypoints-openpifpaf-wheel-pair-localizer.md` | 方向 5 的已實作版本 |
 | `docs/method-survey.md` | 方向 6 提及的 BEV 3D 偵測模型調查（車輛朝向估算脈絡） |

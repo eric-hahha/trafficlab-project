@@ -79,7 +79,7 @@ from trafficlab.projection.car_template_placement import (
     anchor_fit_report,
     build_reference_points,
 )
-from trafficlab.diagnostics.parallax_correction_check import (
+from trafficlab.projection.parallax_reprojection import (
     find_frame,
     compute_frame_records,
     compute_view_extent,
@@ -1732,7 +1732,7 @@ class CarTemplateCalibrationWidget(QWidget):
         QMessageBox.information(self, "已套用", f"已寫入 {self._g_proj_path}")
 
     # ------------------------------------------------------------------
-    # Tab 5: verify -- reuses trafficlab.diagnostics.parallax_correction_check
+    # Tab 5: verify -- reuses trafficlab.projection.parallax_reprojection
     # pre/post overlay machinery (no changes to that module) to compare the
     # same frame's kp_cctv under a "修正前" G_projection vs. a "修正後" one,
     # without touching whichever G_projection is loaded in tab 1.
@@ -1810,7 +1810,7 @@ class CarTemplateCalibrationWidget(QWidget):
             return None
 
     def _pick_verify_frame(self, g_engine, kp_conf: float, tid_filter: Optional[int]) -> Optional[int]:
-        """Same idea as parallax_correction_check.pick_richest_frame, but
+        """Same idea as parallax_reprojection.pick_richest_frame, but
         honoring the tracked_id filter -- that helper has no such option and
         this module doesn't extend it, so the (short) frame-scoring loop is
         duplicated here rather than there."""

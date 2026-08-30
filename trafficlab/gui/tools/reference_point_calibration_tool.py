@@ -55,7 +55,7 @@ from trafficlab.gui.tabs.calibration_stage.undistort_stage import ImageViewer
 from trafficlab.visualization.video_player import VideoPlayer
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.projection.reference_point_calibration import ReferencePoint, calibrate
-from trafficlab.diagnostics.parallax_correction_check import (
+from trafficlab.projection.parallax_reprojection import (
     find_frame,
     compute_frame_records,
     compute_view_extent,
@@ -150,7 +150,7 @@ class ComparisonViewer(ImageViewer):
 
     The two pixmaps only line up if the caller rendered them with the same
     figsize/dpi and the same view_extent (see plot_frame_pre_post_keypoints
-    and compute_view_extent in parallax_correction_check.py) -- this class
+    and compute_view_extent in parallax_reprojection.py) -- this class
     just stacks whatever it's given, it doesn't verify alignment."""
 
     def __init__(self, parent=None):

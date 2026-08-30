@@ -1,4 +1,9 @@
-"""Parallax-correction before/after diagnostic for reprojection outputs.
+"""Parallax-correction before/after reprojection helpers.
+
+Shared by scripts/export_cctv_sat_composite.py (--right-panel parallax) and
+the car-template / reference-point calibration tools' verify tabs to draw
+the per-keypoint "apparent h=0 point -> height-corrected kp_sat" displacement
+lines on the satellite image.
 
 Every kp_sat[i] stored in a replay JSON is already parallax-corrected for
 that keypoint's own template height (see GProjection.cctv_to_sat and the

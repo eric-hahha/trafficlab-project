@@ -258,7 +258,7 @@ QT_QPA_PLATFORM=offscreen python scripts/export_cctv_sat_composite.py \
 | `--sat-image` | `location/<code>/sat_<code>.png` | 覆寫 SAT 背景圖路徑 |
 | `--kp-conf` | `0.2` | 僅在缺少 `bbox_2d` 時，用來推導 2D box 的關鍵點信心度閾值；`--right-panel parallax` 時也用來判斷 `kp_cctv`/`kp_sat` 配對是否有效 |
 | `--sat-only` | 關閉 | 完全跳過 CCTV 面板與水平拼接 — 只輸出 SAT 疊圖，也因為不需要而跳過開啟影片檔 |
-| `--right-panel` | `sat` | `sat`：現有 SAT 疊圖（box/arrow/coords dot/label/keypoints）；`parallax`：改畫 parallax-correction 前後對比 — 每個 `kp_sat`（彩色點+label，已校正）與其未校正的 h=0 apparent point（灰點）連線，逐幀比照 `trafficlab/diagnostics/parallax_correction_check.py` 的畫面。需要能解析出 G_projection config（見 `--g-proj`） |
+| `--right-panel` | `sat` | `sat`：現有 SAT 疊圖（box/arrow/coords dot/label/keypoints）；`parallax`：改畫 parallax-correction 前後對比 — 每個 `kp_sat`（彩色點+label，已校正）與其未校正的 h=0 apparent point（灰點）連線，逐幀比照 `trafficlab/projection/parallax_reprojection.py` 的畫面。需要能解析出 G_projection config（見 `--g-proj`） |
 | `--g-proj` | `location/<code>/G_projection_<code>.json` | 僅 `--right-panel parallax` 使用；覆寫 G_projection config 路徑 |
 | `--kp-color-mode` | `track` | 僅 `--right-panel sat` 有效：`track` 依每輛車的 track 顏色來上色（預設，與 GUI 一致）；`part` 改為依車輛部位上色（wheel/light/plate/door/corner/bumper/glass），同部位跨車輛使用相同顏色。`--right-panel parallax` 一律依部位上色，不受此 flag 影響 |
 | `--no-sat-keypoints` | 關閉 | SAT 面板不畫關鍵點（box/arrow/coords dot/label 不受影響）；只能搭配 `--right-panel sat` |
@@ -385,7 +385,7 @@ python scripts/car_template_calibration_tool.py \
 
 一定要有既有的 `G_projection_<code>.json` 才能運作；預設不會覆寫它，結果另存到 `output/car_template_calibration/<location_code>/`，需要在「結果」tab 另外按「套用到 G_projection」才會覆寫（無法復原）。
 
-核心程式碼：`trafficlab/projection/car_template_placement.py`（模板數學，純 numpy）、`trafficlab/gui/tools/car_template_calibration_tool.py`（GUI 本體）；共用 `trafficlab/projection/reference_point_calibration.py` 的 `calibrate()`，以及「5. 驗證」tab 用到的 `trafficlab/diagnostics/parallax_correction_check.py`。
+核心程式碼：`trafficlab/projection/car_template_placement.py`（模板數學，純 numpy）、`trafficlab/gui/tools/car_template_calibration_tool.py`（GUI 本體）；共用 `trafficlab/projection/reference_point_calibration.py` 的 `calibrate()`，以及「5. 驗證」tab 用到的 `trafficlab/projection/parallax_reprojection.py`。
 
 ### 12. 多參考物最小二乘校正工具
 
@@ -408,7 +408,7 @@ python scripts/reference_point_calibration_tool.py \
 
 一定要有既有的 `G_projection_<code>.json` 才能運作；預設不會覆寫它，結果另存到 `output/reference_point_calibration/<location_code>/`，需要在「結果」tab 另外按「套用到 G_projection」才會覆寫（無法復原）。
 
-核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/diagnostics/parallax_correction_check.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
+核心程式碼：`trafficlab/projection/reference_point_calibration.py`（`ReferencePoint`、`calibrate()`，純 numpy/scipy）、`trafficlab/gui/tools/reference_point_calibration_tool.py`（GUI 本體）；「4. 驗證」tab 共用 `trafficlab/projection/parallax_reprojection.py`（跟 `car_template_calibration_tool` 的「5. 驗證」tab 同一套邏輯）。
 
 ### 13. CCTV 影格選取工具
 

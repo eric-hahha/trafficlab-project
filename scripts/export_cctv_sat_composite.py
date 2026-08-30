@@ -20,7 +20,7 @@ import numpy as np
 from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtGui import QPixmap, QPainter
 
-from trafficlab.diagnostics.parallax_correction_check import compute_frame_records, compute_view_extent
+from trafficlab.projection.parallax_reprojection import compute_frame_records, compute_view_extent
 from trafficlab.motion.keypoints_openpifpaf import kp_bbox_xyxy
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.visualization.cctv_renderer import CCTRenderer
@@ -75,7 +75,7 @@ def main():
                         'parallax: replace the panel with a parallax-correction before/after view — '
                         'each kp_sat (colored dot, labeled, height-corrected) joined by a line to its '
                         'uncorrected h=0 apparent point (gray dot), mirroring '
-                        'trafficlab/diagnostics/parallax_correction_check.py. Requires a resolvable '
+                        'trafficlab/projection/parallax_reprojection.py. Requires a resolvable '
                         'G_projection config (see --g-proj).')
     p.add_argument('--g-proj', default=None,
                    help='G_projection config path, only used with --right-panel parallax '

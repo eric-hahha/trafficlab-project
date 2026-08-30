@@ -6,7 +6,7 @@ keypoint's uncorrected h=0 apparent point (recomputed from kp_cctv via
 GProjection), joined by a line colored to match the keypoint's car part --
 the direct visual of how much and in which direction each keypoint's own
 height template moves it. See
-trafficlab/diagnostics/parallax_correction_check.py for the underlying
+trafficlab/projection/parallax_reprojection.py for the underlying
 computation.
 
 By default kp_sat is read as already stored in the replay JSON (from
@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from trafficlab.diagnostics.parallax_correction_check import (
+from trafficlab.projection.parallax_reprojection import (
     find_frame,
     compute_frame_records,
     pick_richest_frame,

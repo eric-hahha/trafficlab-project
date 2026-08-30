@@ -69,7 +69,7 @@ python scripts/reference_point_calibration_tool.py \
 
 ### 4.「驗證」tab
 
-用真實的關鍵點推論結果（而不是手動標的參考點）對照**兩個** G_projection——「原版」與「新版」——校正結果差多少：底層直接重用 `trafficlab/diagnostics/parallax_correction_check.py`（跟 `scripts/check_parallax_correction.py` 的 `--recompute` 開／關是同一套邏輯），畫出每個關鍵點「校正前（h=0 表觀位置）→校正後」的位移線疊在衛星圖上。**灰點（校正前）一律即時計算**；彩色點（校正後）依欄位而定——「新版」用 `kp_cctv` 原始像素座標＋車型關鍵點高度樣板，套用選的 G_projection 即時重算；「原版」讀 replay JSON 裡當初推論存的舊 `kp_sat`，不重算。所以可以拿來測試「換一個新的 G_projection，這些既有的偵測結果校正起來會不會比較準」，不用重新跑一次關鍵點推論。
+用真實的關鍵點推論結果（而不是手動標的參考點）對照**兩個** G_projection——「原版」與「新版」——校正結果差多少：底層直接重用 `trafficlab/projection/parallax_reprojection.py`（跟 `scripts/check_parallax_correction.py` 的 `--recompute` 開／關是同一套邏輯），畫出每個關鍵點「校正前（h=0 表觀位置）→校正後」的位移線疊在衛星圖上。**灰點（校正前）一律即時計算**；彩色點（校正後）依欄位而定——「新版」用 `kp_cctv` 原始像素座標＋車型關鍵點高度樣板，套用選的 G_projection 即時重算；「原版」讀 replay JSON 裡當初推論存的舊 `kp_sat`，不重算。所以可以拿來測試「換一個新的 G_projection，這些既有的偵測結果校正起來會不會比較準」，不用重新跑一次關鍵點推論。
 
 版面是左圖右側邊欄：所有操作欄位都在右側側邊欄，圖片顯示在左側。輸出的兩張圖固定用同一個縮放倍率與座標範圍，並疊在同一個畫面裡——原版在下層、新版在上層，側邊欄有一個「上層（新版）透明度」滑桿可以即時調整上層圖片的透明度（純調整顯示，不用重新產生圖片），方便用眼睛比較兩者差異。
 
