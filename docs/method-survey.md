@@ -688,8 +688,10 @@ BEVHeight++（有 weights，先測）
 
 ### 選項 A：驗證 bbox 幾何法 + 開啟 SVG
 
+> 過時：bbox 幾何朝向估計的程式碼與評估腳本已從 repo 移除，本選項僅存記錄。
+
 1. 確認 `location/test21/G_projection_test21.json` 有 `"use_svg": true` 且 SVG 路網檔案存在
-2. 修改 `eval_bbox_heading.py` 傳入 SVG heading 做消歧義
+2. 修改 eval 腳本傳入 SVG heading 做消歧義
 3. 目視比對有無 SVG 的箭頭差異
 
 ### 選項 B：Space Box 幾何修正
