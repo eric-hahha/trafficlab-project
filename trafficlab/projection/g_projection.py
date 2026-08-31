@@ -29,6 +29,8 @@ class GProjection:
         x_sat = par.get('x_cam_coords_sat', 0.0)
         y_sat = par.get('y_cam_coords_sat', 0.0)
         self.cam_sat = np.array([x_sat, y_sat], dtype=np.float64)
+        # (0,0) 是衛星圖左上角像素，不可能是真實相機位置 —— 視為未校正。
+        self.cam_sat_valid = bool(np.linalg.norm(self.cam_sat) > 1.0)
         self.px_per_m = par.get('px_per_meter', 1.0)
         if self.px_per_m <= 0.001: self.px_per_m = 1.0
 
@@ -98,20 +100,59 @@ class GProjection:
         u_u, v_u = self.flat_sat_to_undistorted(flat_pt[0], flat_pt[1])
         return self.undistorted_to_cctv(u_u, v_u)
 
-    def get_ground_contact_from_box(self, rect, h_meters, ref_method="center_bottom_side", proj_method="down_h"):
+    def get_ground_contact_from_box(self, rect, h_meters, ref_method="center_bottom_side", proj_method="down_h", ref_point=None):
         if hasattr(rect, 'x'): rx, ry, rw, rh = rect.x(), rect.y(), rect.width(), rect.height()
         else: rx, ry, rw, rh = rect
-        cx = rx + rw/2
-        if ref_method == "center_bottom_side": cy = ry + rh
-        else: cy = ry + rh/2
-            
+        if ref_point is not None:
+            cx, cy = ref_point
+        else:
+            cx = rx + rw/2
+            if ref_method == "center_bottom_side": cy = ry + rh
+            else: cy = ry + rh/2
+
         apparent_sat = self.cctv_to_sat(cx, cy, h=0)
         final_sat = apparent_sat
         if proj_method == "down_h": final_sat = self.parallax_correct_ground_to_real(apparent_sat, h_meters)
         elif proj_method == "down_h_2": final_sat = self.parallax_correct_ground_to_real(apparent_sat, h_meters / 2.0)
-            
+
         gc_cctv = self.sat_to_cctv(final_sat[0], final_sat[1], h=0)
         return { "sat_coords": final_sat, "cctv_ref_point": (cx, cy), "cctv_ground_point": gc_cctv }
+
+    def footprint_anchor_to_center(self, sat_pt, heading_deg, width_m, length_m):
+        """把「面向相機那一側的接地輪廓點」還原成 footprint 幾何中心。
+
+        mask 底部中心取的是影像最低點；在掠射視角（本專案的路口監視器仰角約 5°~23°）
+        下它等同於 footprint 上離相機最近的邊，而不是幾何中心。直接拿它當 floor box
+        的中心會讓整個框往相機方向偏，偏移量正好是矩形在視線方向上的支撐距離
+        h(u) = |u·前|·L/2 + |u·右|·W/2，所以沿視線往內推回 h(u) 即可還原。
+
+        heading_deg 為 None（尚未取得朝向）時改用朝向均勻分布下的期望支撐距離
+        (L+W)/π。方向 u 只由相機幾何決定、不需要朝向，所以這個 fallback 讓修正從
+        第一幀就生效；等 heading 出現時 h(u) 只會微調（汽車約 0.05 m），不會像原本
+        那樣在 heading 首次出現的那一幀一次補上整段位移。
+
+        回傳 None 表示條件不足（相機座標未校正、或物件幾乎貼在相機上導致方向不可靠），
+        呼叫端應維持原本的座標。
+        """
+        if not self.cam_sat_valid:
+            return None
+
+        p = np.array(sat_pt, dtype=np.float64)
+        u = self.cam_sat - p
+        dist = np.linalg.norm(u)
+        if dist < self.px_per_m:   # 不到 1 公尺，視線方向已無意義
+            return None
+        u = u / dist
+
+        if heading_deg is None:
+            support_m = (length_m + width_m) / math.pi
+        else:
+            rad = math.radians(heading_deg)
+            fwd = np.array([math.cos(rad), math.sin(rad)], dtype=np.float64)
+            right = np.array([-math.sin(rad), math.cos(rad)], dtype=np.float64)
+            support_m = abs(float(u @ fwd)) * length_m / 2.0 + abs(float(u @ right)) * width_m / 2.0
+
+        return (p - u * support_m * self.px_per_m).tolist()
 
     def sat_floor_to_cctv_3d(self, sat_poly, obj_height_m):
         """

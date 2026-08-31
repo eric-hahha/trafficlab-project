@@ -7,7 +7,12 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
-from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
+from trafficlab.motion.kinematics import TrackSmoother, KalmanTrackSmoother, MotorcycleLateralCorrector
+from trafficlab.io.prior_dimensions import (
+    load_location_overrides,
+    normalize_prior_map,
+    resolve_dims_layered,
+)
 import logging
 
 # 設置日誌記錄
@@ -20,6 +25,16 @@ logging.basicConfig(
     ]
 )
 from trafficlab.io.replay_writer import ReplayWriter
+
+
+def _get_mask_bottom_center(mask_xy, tolerance_px=3):
+    """從 mask 輪廓點取得底部中心點（最大 y 值附近的平均 x）。"""
+    if mask_xy is None or len(mask_xy) == 0:
+        return None
+    pts = np.array(mask_xy)
+    max_y = pts[:, 1].max()
+    bottom_pts = pts[pts[:, 1] >= max_y - tolerance_px]
+    return (float(bottom_pts[:, 0].mean()), float(max_y))
 
 
 class InferencePipeline:
@@ -106,7 +121,12 @@ class InferencePipeline:
         with open("prior_dimensions.json", 'r') as f: all_priors = json.load(f)
         measure_set = full_config.get('prior_dimensions', 'measurements_visdrone')
         prior_dims = all_priors.get(measure_set, {})
-        prior_dims_norm = {k.strip().lower(): v for k, v in prior_dims.items()}
+        prior_dims_norm = normalize_prior_map(prior_dims)
+
+        # 場地層級的尺寸覆寫（location/<loc>/dimensions_<loc>.json），缺檔則為空
+        dim_by_track, dim_by_class = load_location_overrides(self.g_proj_path)
+        if dim_by_track or dim_by_class:
+            self.log_fn(f"Dimension overrides: {len(dim_by_track)} by track, {len(dim_by_class)} by class")
 
         # Output Setup
         footage_name = os.path.basename(self.footage_path)
@@ -200,6 +220,7 @@ class InferencePipeline:
             cls_ids = r.boxes.cls.cpu().numpy()
             confs = r.boxes.conf.cpu().numpy()
             track_ids = r.boxes.id.cpu().numpy() if r.boxes.id is not None else [None]*len(boxes)
+            masks_xy = r.masks.xy if r.masks is not None else None
 
             for j, box in enumerate(boxes):
                 # 1. ROI Check
@@ -217,34 +238,48 @@ class InferencePipeline:
 
                 # 2. Projection
                 cls_name = r.names[int(cls_ids[j])]
-                dims = prior_dims_norm.get(cls_name.strip().lower())
+                tid = int(track_ids[j]) if track_ids[j] is not None else None
+                dims = resolve_dims_layered(prior_dims_norm, cls_name, tid, dim_by_track, dim_by_class)
                 have_measurements = (dims is not None)
                 h_real = float(dims.get('height', 0.0)) if have_measurements else 0.0
 
                 bx1, by1, bx2, by2 = box
+                mask_ref = None
+                mask_contour = None
+                if masks_xy is not None and j < len(masks_xy) and len(masks_xy[j]) > 0:
+                    mask_ref = _get_mask_bottom_center(masks_xy[j])
+                    mask_contour = masks_xy[j].tolist()
+                    if mask_ref is not None and mask_ref[1] >= real_h - 5:
+                        mask_ref = None  # mask 延伸至畫面底部邊緣，投影不可靠，fallback 至 bbox
+                # mask 底部中心已是地面接觸點 (h=0)，不需再套視差修正 (down_h/down_h_2)，
+                # 否則會把落地點重複拉向相機而偏移。僅在退回 bbox 參考點時沿用 config 的 proj_method
+                # (該參考點約在半車高，才需要修正)。
+                proj_method = 'none' if mask_ref is not None else g_data.get('proj_method', 'down_h')
                 proj_res = g_engine.get_ground_contact_from_box(
                     (bx1, by1, bx2-bx1, by2-by1), h_real,
                     ref_method=g_data.get('ref_method', 'center_bottom_side'),
-                    proj_method=g_data.get('proj_method', 'down_h')
+                    proj_method=proj_method,
+                    ref_point=mask_ref
                 )
                 sat_coords = proj_res['sat_coords']
 
-                # 3. Kinematics
-                tid = int(track_ids[j]) if track_ids[j] is not None else None
+                # 3. Kinematics (tid 已在尺寸查詢時取得)
                 heading = None
                 speed = 0.0
                 is_def = False
 
                 if tid is not None:
                     if tid not in track_smoothers:
-                        # 根據車輛類別選擇合適的軌跡平滑器
                         vehicle_class = cls_name.strip().lower()
                         kinematics_config = full_config['kinematics']
-                        
-                        # 檢查是否啟用橫向修正且為機車類別
+                        use_kalman = kinematics_config.get('use_kalman', False)  # default off; enable in inference_config.yaml
                         lateral_config = kinematics_config.get('lateral_correction', {})
-                        if (lateral_config.get('enabled', False) and 
-                            vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
+
+                        if use_kalman:
+                            track_smoothers[tid] = KalmanTrackSmoother(kinematics_config)
+                            logging.info(f"創建KalmanTrackSmoother for 車輛類別: {vehicle_class}, track_id: {tid}")
+                        elif (lateral_config.get('enabled', False) and
+                              vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
                             track_smoothers[tid] = MotorcycleLateralCorrector(kinematics_config, vehicle_class)
                             logging.info(f"創建MotorcycleLateralCorrector for 車輛類別: {vehicle_class}, track_id: {tid}")
                         else:
@@ -274,6 +309,21 @@ class InferencePipeline:
                 have_heading = (heading is not None)
                 if not have_heading: speed = 0.0
 
+                # 3b. Footprint anchor -> geometric centre
+                # mask 底部中心落在「面向相機那一側」的接地輪廓上，不是 footprint 中心；
+                # 拿它當 floor box 中心會讓整個框往相機方向偏（Hsinchu1 的碰撞因此從
+                # 側撞變成前撞）。只在 mask 路徑修正 —— bbox 路徑的 down_h/down_h_2
+                # 已經沿視線做過另一種位移，疊加會過度修正。
+                # 放在 smoother 之後：這個偏移對同一台車緩慢變化，不會污染速度與 heading。
+                # 不以 have_heading 為條件 —— 否則 heading 首次出現的那一幀會一次補上
+                # 整段位移（汽車約 1.7 m 的橫移）；heading 為 None 時走等向 fallback。
+                if mask_ref is not None and have_measurements:
+                    centered = g_engine.footprint_anchor_to_center(
+                        sat_coords, heading, dims['width'], dims['length']
+                    )
+                    if centered is not None:
+                        sat_coords = centered
+
                 # 4. 3D Lifting
                 sat_floor_box = None
                 bbox_3d = None
@@ -297,6 +347,7 @@ class InferencePipeline:
                     "class": cls_name,
                     "confidence": float(confs[j]),
                     "bbox_2d": [float(x) for x in box],
+                    "mask_contour": mask_contour,
                     "reference_point": proj_res['cctv_ref_point'],
                     "sat_coords": sat_coords,
                     "have_heading": have_heading,
