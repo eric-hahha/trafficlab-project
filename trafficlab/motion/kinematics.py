@@ -396,6 +396,135 @@ class MotorcycleMotionFilter:
         return blended_pos
 
 
+class KalmanTrackSmoother:
+    """
+    Constant-Velocity Kalman Filter for satellite-coordinate vehicle tracking.
+
+    State vector : [px, py, vx, vy]  (sat pixels, sat pixels/s)
+    Measurement  : [px, py]           (from YOLO projection)
+
+    Config keys  (under kinematics.kalman):
+        r_pos        – measurement noise variance (sat px²). Default 25.0  (~5 px σ)
+        q_accel      – acceleration spectral density (process noise).  Default 2.0
+        init_vel_var – initial velocity covariance diagonal.           Default 100.0
+    """
+
+    def __init__(self, config: dict):
+        self.cfg = config
+        kal = config.get('kalman', {})
+        self.r_pos        = float(kal.get('r_pos',        25.0))
+        self.q_pos        = float(kal.get('q_pos',        25.0))   # position process noise (px²)
+        self.q_accel      = float(kal.get('q_accel',       2.0))   # velocity process noise scale
+        self.init_vel_var = float(kal.get('init_vel_var', 100.0))
+        self.max_physics_speed       = 200.0
+        self.min_speed_kmh_for_heading = float(config.get('heading_min_speed_for_update', 0.1))
+        self.svg_snap_thresh = 15.0
+        self.svg_snap_alpha  = 0.3
+
+        # H: observe position only
+        self.H = np.array([[1, 0, 0, 0],
+                           [0, 1, 0, 0]], dtype=np.float64)
+        self.R = np.eye(2, dtype=np.float64) * self.r_pos
+
+        # Kalman state — initialized on first measurement
+        self.x: np.ndarray | None = None   # [px, py, vx, vy]
+        self.P: np.ndarray | None = None   # 4×4 covariance
+
+        # Light heading-vector EMA (stabilises direction at low speed)
+        self.heading_vec: np.ndarray | None = None
+
+    # ------------------------------------------------------------------
+    def update(self, sat_coords, dt: float, px_per_m: float,
+               svg_heading: float = None) -> dict:
+        z   = np.array(sat_coords, dtype=np.float64)
+        dt  = max(float(dt), 1e-3)
+
+        # ── First call: initialise with zero velocity ────────────────
+        if self.x is None:
+            self.x = np.array([z[0], z[1], 0.0, 0.0], dtype=np.float64)
+            self.P = np.diag([self.r_pos, self.r_pos,
+                              self.init_vel_var, self.init_vel_var])
+            return {"speed_kmh": 0.0,
+                    "heading": svg_heading,
+                    "default_heading": svg_heading is not None,
+                    "corrected_position": z.tolist()}
+
+        # ── Physics sanity check (reject teleports > 200 km/h) ──────
+        dist_px = np.linalg.norm(z - self.x[:2])
+        if (dist_px / px_per_m / dt) * 3.6 > self.max_physics_speed:
+            return self._result(px_per_m, svg_heading, default=False)
+
+        # ── Predict ──────────────────────────────────────────────────
+        F = np.array([[1, 0, dt, 0 ],
+                      [0, 1, 0,  dt],
+                      [0, 0, 1,  0 ],
+                      [0, 0, 0,  1 ]], dtype=np.float64)
+
+        # Q: diagonal formulation so position noise (q_pos) is fps-independent.
+        # At high fps the DWPA dt⁴ term collapses to ~0, freezing the filter;
+        # using a fixed q_pos keeps the Kalman gain sensible at any frame rate.
+        q_vel = self.q_accel * dt ** 2
+        Q = np.diag([self.q_pos, self.q_pos, q_vel, q_vel])
+
+        x_p = F @ self.x
+        P_p = F @ self.P @ F.T + Q
+
+        # ── Update ───────────────────────────────────────────────────
+        S   = self.H @ P_p @ self.H.T + self.R
+        K   = P_p @ self.H.T @ np.linalg.inv(S)
+        self.x = x_p + K @ (z - self.H @ x_p)
+        self.P = (np.eye(4) - K @ self.H) @ P_p
+
+        return self._result(px_per_m, svg_heading, default=False)
+
+    # ------------------------------------------------------------------
+    def _result(self, px_per_m: float, svg_heading, default: bool) -> dict:
+        vx, vy    = self.x[2], self.x[3]
+        speed_kmh = (math.hypot(vx, vy) / px_per_m) * 3.6
+
+        heading    = None
+        is_default = False
+
+        if speed_kmh >= self.min_speed_kmh_for_heading:
+            raw_deg = (math.degrees(math.atan2(vy, vx)) + 360) % 360
+            heading = self._smooth_heading(raw_deg)
+            if svg_heading is not None:
+                heading = self._snap_to_svg(heading, svg_heading)
+        elif self.heading_vec is not None:
+            heading    = (math.degrees(
+                math.atan2(self.heading_vec[1], self.heading_vec[0])) + 360) % 360
+            is_default = True
+        elif svg_heading is not None:
+            heading    = svg_heading
+            is_default = True
+
+        return {
+            "speed_kmh":         speed_kmh,
+            "heading":           heading,
+            "default_heading":   is_default,
+            "corrected_position": [self.x[0], self.x[1]],
+        }
+
+    def _smooth_heading(self, raw_deg: float) -> float:
+        rad = math.radians(raw_deg)
+        v   = np.array([math.cos(rad), math.sin(rad)], dtype=np.float64)
+        if self.heading_vec is None:
+            self.heading_vec = v
+            return raw_deg
+        blended = 0.25 * v + 0.75 * self.heading_vec
+        norm = np.linalg.norm(blended)
+        if norm > 1e-6:
+            self.heading_vec = blended / norm
+        return (math.degrees(
+            math.atan2(self.heading_vec[1], self.heading_vec[0])) + 360) % 360
+
+    def _snap_to_svg(self, heading: float, svg_heading: float) -> float:
+        diff = (heading - svg_heading + 180) % 360 - 180
+        if abs(diff) < self.svg_snap_thresh:
+            return (heading - diff * self.svg_snap_alpha + 360) % 360
+        return heading
+
+
 class MotorcycleLateralCorrector(TrackSmoother):
     def __init__(self, config: dict, vehicle_class: str = None):
         super().__init__(config)
