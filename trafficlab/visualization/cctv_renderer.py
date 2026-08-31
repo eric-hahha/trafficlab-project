@@ -29,7 +29,8 @@ class CCTRenderer:
                show_3d=True,
                box_thickness=2,
                face_opacity=50,
-               show_label=True):
+               show_label=True,
+               show_mask=True):
         """Render tracked-object overlays onto *frame* and return a QPixmap.
 
         Parameters
@@ -98,8 +99,27 @@ class CCTRenderer:
 
             # 2D MODE
             elif not show_3d:
+                mask_contour = obj.get("mask_contour")
                 bbox = obj.get("bbox_2d")
-                if bbox:
+
+                if show_mask and mask_contour and len(mask_contour) >= 3:
+                    # 繪製 mask 輪廓多邊形
+                    poly = QPolygonF([QPointF(p[0], p[1]) for p in mask_contour])
+                    painter.setPen(QPen(col, box_thickness))
+                    fill = QColor(col)
+                    fill.setAlpha(face_opacity)
+                    painter.setBrush(QBrush(fill))
+                    painter.drawPolygon(poly)
+
+                    if show_label and bbox:
+                        x1, y1 = int(bbox[0]), int(bbox[1])
+                        painter.setPen(QPen(Qt.white))
+                        fm = painter.fontMetrics()
+                        tw, th = fm.width(lbl), fm.height()
+                        painter.fillRect(QRectF(x1, y1 - th, tw + 4, th), col)
+                        painter.drawText(QPointF(x1 + 2, y1 - 2), lbl)
+
+                elif bbox:
                     x1, y1, x2, y2 = map(int, bbox)
                     rect = QRectF(x1, y1, x2 - x1, y2 - y1)
                     painter.setPen(QPen(col, box_thickness))

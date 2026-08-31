@@ -73,6 +73,12 @@ class VisualizationTab(QWidget):
 
         self.text_color_mode = "White"
         self.speed_update_delay_frames = 30
+
+        self.show_trail = False
+        self.trail_len = 60
+        self.track_full_history = {}
+        self.use_avg_speed = False
+        self.avg_speed_map = {}
         
         self.show_fov = False
         self.fov_fill_opacity = 25
@@ -180,6 +186,16 @@ class VisualizationTab(QWidget):
         sat_vis_layout = QVBoxLayout()
         self.chk_sat_box = QCheckBox("Floor Box"); self.chk_sat_box.setChecked(True)
         self.chk_sat_box.toggled.connect(self.update_ui_state)
+        self.chk_trail = QCheckBox("Show Trail")
+        self.chk_trail.setChecked(False)
+        self.chk_trail.toggled.connect(self.update_ui_state)
+        trail_row = QHBoxLayout()
+        trail_row.addWidget(QLabel("Trail Frames:"))
+        self.slider_trail_len = QSlider(Qt.Horizontal)
+        self.slider_trail_len.setRange(10, 300)
+        self.slider_trail_len.setValue(60)
+        self.slider_trail_len.valueChanged.connect(self.update_ui_state)
+        trail_row.addWidget(self.slider_trail_len)
         # --- NEW: Coords Dot Checkbox ---
         self.chk_sat_coords = QCheckBox("Show Coords Dot")
         self.chk_sat_coords.setChecked(False)
@@ -188,11 +204,17 @@ class VisualizationTab(QWidget):
         self.chk_sat_arrow.toggled.connect(self.update_ui_state)
         self.chk_sat_label = QCheckBox("Text Label"); self.chk_sat_label.setChecked(self.show_sat_label)
         self.chk_sat_label.toggled.connect(self.update_ui_state)
+        self.chk_avg_speed = QCheckBox("Avg Speed")
+        self.chk_avg_speed.setChecked(False)
+        self.chk_avg_speed.toggled.connect(self.update_ui_state)
         # Add widgets to layout
         sat_vis_layout.addWidget(self.chk_sat_box)
+        sat_vis_layout.addWidget(self.chk_trail)
+        sat_vis_layout.addLayout(trail_row)
         sat_vis_layout.addWidget(self.chk_sat_coords)
         sat_vis_layout.addWidget(self.chk_sat_arrow)
         sat_vis_layout.addWidget(self.chk_sat_label)
+        sat_vis_layout.addWidget(self.chk_avg_speed)
         
         th_lay = QHBoxLayout()
         th_lay.addWidget(QLabel("Box Thick:"))
@@ -487,6 +509,19 @@ class VisualizationTab(QWidget):
             self.json_frame_map = {f["frame_index"]: f["objects"] for f in data.get("frames", [])}
             self.current_frame_idx = 0
 
+            track_history = {}
+            for f in data.get("frames", []):
+                fi = f["frame_index"]
+                for obj in f.get("objects", []):
+                    tid = obj.get("tracked_id")
+                    coord = obj.get("sat_coords")
+                    cls = obj.get("class", "?")
+                    if tid is not None and coord is not None:
+                        if tid not in track_history:
+                            track_history[tid] = (cls, [])
+                        track_history[tid][1].append((fi, coord))
+            self.track_full_history = track_history
+
             self.has_3d_data = False
             for f in data.get("frames", [])[:50]:
                 for o in f.get("objects", []):
@@ -507,6 +542,7 @@ class VisualizationTab(QWidget):
             self.progress_bar.setRange(0, max_frames - 1)
 
             self.speed_display_cache = {}
+            self.avg_speed_map = self._compute_avg_speed_map(data)
             self.actual_fps = 0.0
             self.last_real_time = 0
             self.update_frame()
@@ -538,6 +574,32 @@ class VisualizationTab(QWidget):
             except Exception:
                 pass
 
+    def _compute_avg_speed_map(self, data: dict) -> dict:
+        """每個 track 計算平均速度（路徑總長 / 總時間），單位 km/h。"""
+        fps = data.get('meta', {}).get('fps', 30.0)
+        if fps <= 0:
+            fps = 30.0
+        px_per_m = 1.0
+        if self.g_data:
+            px_per_m = self.g_data.get('parallax', {}).get('px_per_meter', 1.0) or 1.0
+
+        avg_map = {}
+        for tid, (cls, entries) in self.track_full_history.items():
+            if len(entries) < 2:
+                continue
+            frame_indices = [fi for fi, _ in entries]
+            coords = [coord for _, coord in entries]
+
+            path_px = sum(
+                math.hypot(coords[k][0] - coords[k-1][0], coords[k][1] - coords[k-1][1])
+                for k in range(1, len(coords))
+            )
+            total_seconds = (frame_indices[-1] - frame_indices[0]) / fps
+            if total_seconds <= 0:
+                continue
+            avg_map[tid] = (path_px / px_per_m / total_seconds) * 3.6
+        return avg_map
+
     def _reset_loaded_media(self):
         if self.player:
             try:
@@ -566,6 +628,8 @@ class VisualizationTab(QWidget):
         self.sat_view.setTransform(QTransform())
         self.svg_layer_groups = {}
         self.speed_display_cache = {}
+        self.track_full_history = {}
+        self.avg_speed_map = {}
         if hasattr(self, 'sat_count_label'):
             self.sat_count_label.hide()
 
@@ -939,8 +1003,11 @@ class VisualizationTab(QWidget):
         self.show_tracking = self.chk_tracking.isChecked()
         self.sat_box_thick = self.slider_sat_thick.value()
         self.show_sat_label = self.chk_sat_label.isChecked()
+        self.use_avg_speed = self.chk_avg_speed.isChecked()
         self.sat_label_size = self.slider_sat_text.value()
         self.show_sat_box = self.chk_sat_box.isChecked()
+        self.show_trail = self.chk_trail.isChecked()
+        self.trail_len = self.slider_trail_len.value()
         # --- NEW: Update State ---
         self.show_sat_coords_dot = self.chk_sat_coords.isChecked()
         self.show_sat_arrow = self.chk_sat_arrow.isChecked()
@@ -1071,6 +1138,17 @@ class VisualizationTab(QWidget):
             sr = self.sat_scene.sceneRect()
             scene_w, scene_h = max(1, int(sr.width())), max(1, int(sr.height()))
 
+        # Build trail data for current frame window
+        trail_data = {}
+        if self.show_trail and self.track_full_history:
+            min_frame = self.current_frame_idx - self.trail_len
+            for tid, (cls, entries) in self.track_full_history.items():
+                seed = f"{cls}_{tid}" if self.show_tracking else cls
+                pts = [coord for fi, coord in entries
+                       if min_frame <= fi <= self.current_frame_idx]
+                if len(pts) >= 2:
+                    trail_data[seed] = pts
+
         # Render all objects into a single transparent pixmap (O(1) scene update).
         pix = self.sat_renderer.render(
             objects, scene_w, scene_h,
@@ -1087,6 +1165,10 @@ class VisualizationTab(QWidget):
             speed_display_cache=self.speed_display_cache,
             speed_update_delay_frames=self.speed_update_delay_frames,
             current_frame_idx=self.current_frame_idx,
+            show_trail=self.show_trail,
+            trail_data=trail_data,
+            use_avg_speed=self.use_avg_speed,
+            avg_speed_map=self.avg_speed_map,
         )
         if getattr(self, 'sat_dyn_item', None) is not None:
             self.sat_dyn_item.setPixmap(pix)
