@@ -2,7 +2,16 @@ import argparse
 import copy
 import gzip
 import json
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from trafficlab.io.prior_dimensions import (  # noqa: E402
+    load_location_overrides,
+    resolve_dims_layered,
+)
 
 
 def load_json(path):
@@ -121,10 +130,15 @@ def compute_velocity_mps(position_m, previous_state, frame_index, fps):
     ]
 
 
-def enrich_object(obj, prior_map, px_per_meter, frame_index, fps, previous_state):
+def enrich_object(obj, prior_map, px_per_meter, frame_index, fps, previous_state,
+                  dim_by_track=None, dim_by_class=None):
     enriched = copy.deepcopy(obj)
     class_name = str(enriched.get("class", "")).strip().lower()
-    dims = prior_map.get(class_name)
+    # 與 pipeline 用同一組尺寸：尺寸會參與錨點修正 h(u)，只讀全域 prior 會讓
+    # dimensions_m 和 sat_coords 對不上。
+    dims = resolve_dims_layered(
+        prior_map, class_name, enriched.get("tracked_id"), dim_by_track, dim_by_class
+    )
     enriched["dimensions_m"] = copy.deepcopy(dims) if dims is not None else None
     enriched["position_m"] = compute_position_m(enriched.get("sat_coords"), px_per_meter)
     enriched["velocity_mps"] = compute_velocity_mps(
@@ -136,7 +150,8 @@ def enrich_object(obj, prior_map, px_per_meter, frame_index, fps, previous_state
     return enriched
 
 
-def filter_and_enrich(data, selected_ids, px_per_meter, prior_map):
+def filter_and_enrich(data, selected_ids, px_per_meter, prior_map,
+                      dim_by_track=None, dim_by_class=None):
     output = copy.deepcopy(data)
     output.setdefault("meta", {})
     output["meta"]["px_per_meter"] = px_per_meter
@@ -168,6 +183,8 @@ def filter_and_enrich(data, selected_ids, px_per_meter, prior_map):
                 frame_index,
                 fps,
                 previous_states.get(track_id),
+                dim_by_track,
+                dim_by_class,
             )
             previous_states[track_id] = {
                 "frame_index": frame_index,
@@ -232,9 +249,17 @@ def main():
     g_projection_data = load_json(g_projection_path)
     px_per_meter = g_projection_data["parallax"]["px_per_meter"]
     prior_map = load_prior_map(args.prior_dimensions, args.prior_set)
+    ovr_track, ovr_class = load_location_overrides(str(g_projection_path))
+    if ovr_track or ovr_class:
+        print(f"[info] 套用場地尺寸覆寫：{len(ovr_track)} by track, {len(ovr_class)} by class")
     output_path = resolve_output_path(args.output_path)
 
-    filtered = filter_and_enrich(input_data, selected_ids, px_per_meter, prior_map)
+    filtered = filter_and_enrich(
+        input_data, selected_ids, px_per_meter, prior_map, ovr_track, ovr_class
+    )
+    filtered.setdefault("meta", {})["dims_source"] = (
+        "location_override" if (ovr_track or ovr_class) else "global_prior"
+    )
     write_json(output_path, filtered)
 
     print(f"Saved filtered output to: {output_path}")
