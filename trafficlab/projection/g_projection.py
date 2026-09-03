@@ -106,10 +106,11 @@ class GProjection:
         else: cy = ry + rh/2
             
         apparent_sat = self.cctv_to_sat(cx, cy, h=0)
-        final_sat = apparent_sat
         if proj_method == "down_h": final_sat = self.parallax_correct_ground_to_real(apparent_sat, h_meters)
         elif proj_method == "down_h_2": final_sat = self.parallax_correct_ground_to_real(apparent_sat, h_meters / 2.0)
-            
+        elif proj_method == "match": final_sat = apparent_sat  # no parallax correction
+        else: final_sat = apparent_sat  # unrecognised value: same as "match"
+
         gc_cctv = self.sat_to_cctv(final_sat[0], final_sat[1], h=0)
         return { "sat_coords": final_sat, "cctv_ref_point": (cx, cy), "cctv_ground_point": gc_cctv }
 

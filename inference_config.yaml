@@ -117,6 +117,10 @@ configs:
   yolo_seg_tight_box:
       prior_dimensions: "measurements_visdrone_v2"
 
+      # mask tight-box 底邊已貼近接地面，不再套 down_h 視差修正
+      projection:
+        proj_method: match
+
       frames:
         fps: 25
         max_frame: -1
@@ -178,6 +182,10 @@ configs:
 
   yolo_seg_tight_box_cpu:
       prior_dimensions: "measurements_visdrone_v2"
+
+      # mask tight-box 底邊已貼近接地面，不再套 down_h 視差修正
+      projection:
+        proj_method: match
 
       frames:
         fps: 25

@@ -115,6 +115,21 @@ class InferencePipeline:
                 "model.type is 'seg' but model.classes (COCO name -> internal class name map) is missing in config"
             )
 
+        # Ground-projection reference point + parallax method.
+        # Resolved from the inference config first, then the G_projection file,
+        # then the historical defaults. Lets one G_projection serve configs that
+        # need different projection behaviour (e.g. seg tight-box wanting
+        # proj_method: match instead of the bbox-oriented down_h).
+        proj_cfg = full_config.get('projection', {}) or {}
+        ref_method = proj_cfg.get('ref_method', g_data.get('ref_method', 'center_bottom_side'))
+        proj_method = proj_cfg.get('proj_method', g_data.get('proj_method', 'down_h'))
+        ref_src = 'config' if 'ref_method' in proj_cfg else ('G_projection' if 'ref_method' in g_data else 'default')
+        proj_src = 'config' if 'proj_method' in proj_cfg else ('G_projection' if 'proj_method' in g_data else 'default')
+        self.log_fn(
+            f"Projection: ref_method={ref_method} (from {ref_src}), "
+            f"proj_method={proj_method} (from {proj_src})"
+        )
+
         # Output Setup
         footage_name = os.path.basename(self.footage_path)
         # use chosen config_name for folder naming (already set above)
@@ -304,8 +319,8 @@ class InferencePipeline:
                 bx1, by1, bx2, by2 = box
                 proj_res = g_engine.get_ground_contact_from_box(
                     (bx1, by1, bx2-bx1, by2-by1), h_real,
-                    ref_method=g_data.get('ref_method', 'center_bottom_side'),
-                    proj_method=g_data.get('proj_method', 'down_h')
+                    ref_method=ref_method,
+                    proj_method=proj_method
                 )
                 sat_coords = proj_res['sat_coords']
 
