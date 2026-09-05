@@ -1,0 +1,23 @@
+{
+  "_readme": [
+    "本場地的車輛尺寸覆寫。優先序：by_track > by_class > 全域 prior_dimensions.json。",
+    "單位公尺。width = 車寬，length = 車長，height = 車高。",
+    "by_track 的鍵是 tracked_id，只在模型/tracker 設定不變時才穩定；換 config 重跑後要重新確認。",
+    "缺這個檔或缺某一層，該層就直接沿用下一層，不影響其他場地。"
+  ],
+  "by_track": {
+    "1": {
+      "width": 1.775,
+      "length": 4.62,
+      "height": 1.465,
+      "_note": "白色轎車（車牌 BYF-7526）。依畫面外觀判定為 Toyota Corolla Altis E170，尺寸取原廠值 4620x1775x1465 mm。車型辨識僅憑影像，請確認後再定案。"
+    },
+    "2": {
+      "width": 0.68,
+      "length": 1.9,
+      "height": 1.15,
+      "_note": "藍色速克達。未辨識車款，採台灣常見 125cc 速克達典型值（車長 1.87~1.93、把手寬 0.68~0.70、含把手高 1.12~1.15 m）。height 刻意不含騎士——騎士是獨立的 person 物件，全域 prior 的 1.6 m 會讓騎士高度被算兩次。"
+    }
+  },
+  "by_class": {}
+}
