@@ -140,6 +140,8 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | `geometric` | 沒有明顯 PifPaf instance-splitting 時，用 bbox IoU 把關鍵點對到 YOLO track id | `--yolo` / `--yolo-conf` / `--yolo-classes` / `--iou-threshold` / `--yolo-boxes-json` / `--yolo-boxes-class` |
 | `segmentation` | PifPaf 把同一台車拆成兩塊多關鍵點碎片、`geometric` 修不了時用 — 詳見 `docs/keypoints-openpifpaf-segmentation-matching.md` | `--seg-model` / `--seg-conf` / `--seg-device` |
 
+例外：搭配 `--localizer wheel_pair` 時，`--method` 一律用 `segmentation`（不分機器）—— 實測 segmentation 的關鍵點比對在 wheel_pair 下結果最好。若同一支影片已有 `record_car_masks.py` 的輸出，帶 `--seg-masks-json` 重用它，不必再跑一次 car-segmenter。
+
 共用選項：
 
 | Flag | 預設值 | 說明 |
