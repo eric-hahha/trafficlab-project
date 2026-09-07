@@ -12,15 +12,17 @@
 |---|---|---|
 | [錨點修正：依接地形狀決定支撐距離](anchor-contact-shape.md) | 已實作後還原 2026-08-16 | 兩輪車關掉橫向項、行人兩項皆關。機車位置移動 0.34 m，汽車不受影響。程式碼已還原，橫向過度修正仍存在 |
 | [遮擋造成的 mask 污染](occlusion-mask-contamination.md) | 擱置 | 四段影片都有（9%~40% 重疊配對），但對 Hsinchu1 碰撞判定實測只差 0.7 px |
+| [Kalman 速度低估：Q 矩陣的對角形式](kalman-q-matrix-speed-underestimate.md) | 待調參 2026-09-07 | 25 fps 下速度只報出真值 49%，成因是 `q_accel` 預設偏低四個量級，非重複幀。調參可解 |
 
 ## 已知但尚未建檔
 
 以下在 2026-08-16 的 Hsinchu1 碰撞面調查中發現，還沒整理成文件：
 
 - **來源影片只有 8.5 fps 的內容**（`video-duplicate-frames`）— `Hsinchu.mp4` 容器標示 25 fps，
-  但 59 個幀轉換裡只有 20 個有實質畫面變化。會讓逐幀速度出現離群值，並可能是 Kalman 速度
-  低估 4 倍的主因之一（濾波器有 2/3 的幀收到「沒有移動」的量測）。拿不到更好的來源，
+  但 59 個幀轉換裡只有 20 個有實質畫面變化。會讓逐幀速度出現離群值。拿不到更好的來源，
   只能在 pipeline 端偵測並處理，但跳過重複幀後 Kalman 的 `dt` 也要跟著改。
+  ~~並可能是 Kalman 速度低估 4 倍的主因之一~~ —— **此推測已於 2026-09-07 推翻**，
+  低估成因是 Q 矩陣參數，詳見 [kalman-q-matrix-speed-underestimate.md](kalman-q-matrix-speed-underestimate.md)。
 - **車輛尺寸 prior 過小** — `measurements_visdrone` 的 `car` 是 1.8×3.8 m，Hsinchu1 的白車
   實際約 1.78×4.63 m。尺寸同時參與 floor box 大小與錨點修正 `h(u)`，換成實際尺寸後
   重建位置會移動 0.29 m。網頁端只換模型大小補不回這個位移。

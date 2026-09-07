@@ -254,6 +254,86 @@ configs:
         speed_ema_alpha: 0.4
 
 
+  seg_default:
+      prior_dimensions: "measurements_visdrone"
+
+      # mask 底邊已貼近接地面，不再套 down_h 視差修正（與 yolo_seg_tight_box 同理）
+      projection:
+        proj_method: match
+
+      frames:
+        fps: 30
+        max_frame: -1
+
+      model:
+        weights: "./models/yolov8s-seg.pt"
+        type: "seg"
+        # COCO 類別名 -> 專案內部類別名。內部名必須存在於上面的 prior_dimensions
+        # set 裡 —— measurements_visdrone 用 "motor"（_v2 才叫 "two_wheeler"），
+        # 兩者尺寸相同。對不上的話 dims 會是 None，就沒有 floor box 與 bbox_3d。
+        classes:
+          car: "car"
+          motorcycle: "motor"
+        device: mps
+        verbose: false
+        imgsz: 1280
+        conf: 0.5
+        iou: 0.25
+        max_det: 600
+        agnostic_nms: false
+        half: false
+
+      tracking:
+        tracker_type: "bytetrack"
+        persist: true
+        track_high_thresh: 0.25
+        track_low_thresh: 0.1
+        new_track_thresh: 0.25
+        match_thresh: 0.8
+        track_buffer: 30
+        fuse_score: true
+
+      kinematics:
+        displacement_threshold: 0.3
+
+        heading_sampling_rate: 15
+        heading_smoothing: "adaptive_ema"
+
+        heading_ema:
+          alpha_min: 0.05
+          alpha_max: 0.4
+          speed_ref: 3.0
+
+        heading_min_speed_for_update: 0.1
+        heading_max_jump: 5
+        heading_recovery_frames: 15
+
+        heading_cosine_weighting: true
+        heading_cosine_min_angle: 10
+        heading_cosine_max_angle: 30
+
+        heading_sat_coords_weighting: true
+        heading_sat_coords_jitter_radius: 0.6
+        heading_sat_coords_jitter_frames: 8
+
+        heading_freeze_on_lost: true
+        heading_freeze_max_lost: 15
+
+        speed_smoothing: "ema"
+        speed_ema_alpha: 0.4
+
+        # --- Kalman filter (replaces the EMA speed/heading path when enabled) ---
+        # 目前關閉，兩個原因：pipeline.py 還沒接上 smoother 選擇邏輯，且下面的
+        # q_accel 預設值已量出偏低約四個量級 —— 25 fps 下速度只報出真值的 49%。
+        # 定案前請先看 backlog/kalman-q-matrix-speed-underestimate.md
+        # （該文實測 q_accel≈20000 在 <=30 fps 內誤差進入 ±1 km/h）。
+        use_kalman: false
+        kalman:
+          r_pos: 25.0          # 量測雜訊變異數（sat px²），約對應 5 px σ 的 YOLO 抖動
+          q_pos: 25.0          # 對角 Q 形式的位置過程雜訊（px²）
+          q_accel: 2.0         # 速度過程雜訊尺度 —— 已知偏低，見上方 backlog 註記
+          init_vel_var: 100.0  # 初始速度不確定度 (px/s)²
+
   test1:
     prior_dimensions: "measurements_visdrone_v2"
 
