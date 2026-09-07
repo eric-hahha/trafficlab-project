@@ -367,6 +367,19 @@ class InferencePipeline:
                 have_heading = (heading is not None)
                 if not have_heading: speed = 0.0
 
+                # 3b. Footprint anchor -> geometric centre (seg tight-box only)
+                # mask 底部中心落在「面向相機那一側」的接地輪廓上，不是 footprint 中心；
+                # 拿它當 floor box 中心會讓整個框往相機方向偏。放在 smoother 之後：
+                # 這個偏移對同一台車緩慢變化，不會污染速度與 heading。不以 have_heading
+                # 為條件——否則 heading 首次出現的那一幀會一次補上整段位移；heading 為
+                # None 時 footprint_anchor_to_center 內建等向 fallback。
+                if is_seg and have_measurements:
+                    centered = g_engine.footprint_anchor_to_center(
+                        sat_coords, heading, dims['width'], dims['length']
+                    )
+                    if centered is not None:
+                        sat_coords = centered
+
                 # 4. 3D Lifting
                 sat_floor_box = None
                 bbox_3d = None

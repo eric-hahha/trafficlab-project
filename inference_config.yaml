@@ -3,6 +3,9 @@ configs:
   slight_smoothing:
       prior_dimensions: "measurements_visdrone_v2"
 
+      projection:
+        ref_method: center_bottom_side
+
       frames:
         fps: 50
         max_frame: -1
@@ -59,6 +62,9 @@ configs:
 
   slight_smoothing_best:
       prior_dimensions: "measurements_visdrone_v2"
+
+      projection:
+        ref_method: center_bottom_side
 
       frames:
         fps: 50
@@ -119,6 +125,7 @@ configs:
 
       # mask tight-box 底邊已貼近接地面，不再套 down_h 視差修正
       projection:
+        ref_method: center_bottom_side
         proj_method: match
 
       frames:
@@ -185,6 +192,7 @@ configs:
 
       # mask tight-box 底邊已貼近接地面，不再套 down_h 視差修正
       projection:
+        ref_method: center_bottom_side
         proj_method: match
 
       frames:
@@ -248,6 +256,9 @@ configs:
 
   test1:
     prior_dimensions: "measurements_visdrone_v2"
+
+    projection:
+      ref_method: center_bottom_side
 
     frames:
       fps: 100
