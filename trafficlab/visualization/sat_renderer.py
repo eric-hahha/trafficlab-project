@@ -78,7 +78,11 @@ class SatRenderer:
                text_color_mode="White",
                speed_display_cache=None,
                speed_update_delay_frames=30,
-               current_frame_idx=0) -> QPixmap:
+               current_frame_idx=0,
+               show_trail=False,
+               trail_data=None,
+               use_avg_speed=False,
+               avg_speed_map=None) -> QPixmap:
         """Render all objects for the current frame into a single transparent QPixmap.
 
         Returns a QPixmap of size (scene_w × scene_h) with all object overlays
@@ -100,6 +104,20 @@ class SatRenderer:
 
         painter = QPainter(self._img)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # --- Trajectory Trails ---
+        if show_trail and trail_data:
+            painter.setBrush(Qt.NoBrush)
+            for seed, pts in trail_data.items():
+                if len(pts) < 2:
+                    continue
+                col = get_color_from_string(seed)
+                painter.setPen(QPen(QColor(col.red(), col.green(), col.blue(), 180), 2))
+                for k in range(1, len(pts)):
+                    painter.drawLine(
+                        QPointF(pts[k-1][0], pts[k-1][1]),
+                        QPointF(pts[k][0],   pts[k][1]),
+                    )
 
         for obj in objects:
             cls = obj.get("class", "?")
@@ -157,19 +175,23 @@ class SatRenderer:
 
             # --- 4. Speed Label ---
             if show_sat_label and coord and (_has_floor or _no_svg_no_3d):
-                raw_s = obj.get("speed_kmh", 0)
-                disp_s = raw_s
-                if tid is not None:
-                    cache = speed_display_cache.get(tid, {"val": raw_s, "last_frame": -999})
-                    if ((current_frame_idx - cache["last_frame"]) >= speed_update_delay_frames
-                            or current_frame_idx < cache["last_frame"]):
-                        cache["val"] = raw_s
-                        cache["last_frame"] = current_frame_idx
-                    speed_display_cache[tid] = cache
-                    disp_s = cache["val"]
-
                 id_prefix = f"#{tid} " if tid is not None else ""
-                label_str = f"{id_prefix}{cls} {disp_s:.1f}km/h"
+                if use_avg_speed and avg_speed_map and tid in avg_speed_map:
+                    # 整段路徑的平均速度，繞過逐幀值與其顯示節流快取
+                    disp_s = avg_speed_map[tid]
+                    label_str = f"{id_prefix}{cls} avg {disp_s:.1f} km/h"
+                else:
+                    raw_s = obj.get("speed_kmh", 0)
+                    disp_s = raw_s
+                    if tid is not None:
+                        cache = speed_display_cache.get(tid, {"val": raw_s, "last_frame": -999})
+                        if ((current_frame_idx - cache["last_frame"]) >= speed_update_delay_frames
+                                or current_frame_idx < cache["last_frame"]):
+                            cache["val"] = raw_s
+                            cache["last_frame"] = current_frame_idx
+                        speed_display_cache[tid] = cache
+                        disp_s = cache["val"]
+                    label_str = f"{id_prefix}{cls} {disp_s:.1f}km/h"
                 font = QFont()
                 font.setPointSize(sat_label_size)
                 painter.setFont(font)
