@@ -81,6 +81,7 @@ class VisualizationTab(QWidget):
         self.has_3d_data = False
         self.show_3d = True
         self.show_label = True
+        self.show_mask = False
         self.face_opacity = 50
 
         self.svg_layer_groups = {} 
@@ -271,6 +272,11 @@ class VisualizationTab(QWidget):
         self.chk_cctv_label.setChecked(True)
         self.chk_cctv_label.toggled.connect(self.update_ui_state)
         cctv_layout.addWidget(self.chk_cctv_label)
+
+        self.chk_cctv_mask = QCheckBox("Mask Contour instead of Box (2D Mode)")
+        self.chk_cctv_mask.setChecked(False)
+        self.chk_cctv_mask.toggled.connect(self.update_ui_state)
+        cctv_layout.addWidget(self.chk_cctv_mask)
 
         self.chk_roi = QCheckBox("Show ROI (Red = Outside)")
         self.chk_roi.setChecked(self.show_roi)
@@ -956,6 +962,7 @@ class VisualizationTab(QWidget):
         self.show_3d = self.chk_3d_box.isChecked()
         self.face_opacity = self.slider_3d_alpha.value()
         self.show_label = self.chk_cctv_label.isChecked()
+        self.show_mask = self.chk_cctv_mask.isChecked()
         self.show_roi = self.chk_roi.isChecked()
         
         # Toggle ROI overlay visibility
@@ -1053,6 +1060,7 @@ class VisualizationTab(QWidget):
             box_thickness=self.box_thickness,
             face_opacity=self.face_opacity,
             show_label=self.show_label,
+            show_mask=self.show_mask,
         )
         if getattr(self, 'cctv_pixmap_item', None) is not None:
             self.cctv_pixmap_item.setPixmap(pix)

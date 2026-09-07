@@ -9,7 +9,7 @@ from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
 from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
-from trafficlab.motion.segmentation_car import mask_to_tight_bbox
+from trafficlab.motion.segmentation_car import mask_to_polygon, polygon_tight_bbox
 from trafficlab.io.replay_writer import ReplayWriter
 
 
@@ -281,9 +281,11 @@ class InferencePipeline:
             for j, box in enumerate(boxes):
                 cls_name = r.names[int(cls_ids[j])]
 
+                mask_contour = None  # image-space [[x,y],...] polygon, seg mode only
                 if is_seg:
                     if masks_data is not None and j < len(masks_data):
-                        tight = mask_to_tight_bbox(masks_data[j].astype(bool))
+                        mask_contour = mask_to_polygon(masks_data[j].astype(bool))
+                        tight = polygon_tight_bbox(mask_contour)
                         if tight is not None:
                             box = np.array(tight, dtype=box.dtype)
                         else:
@@ -403,6 +405,7 @@ class InferencePipeline:
                     "class": cls_name,
                     "confidence": float(confs[j]),
                     "bbox_2d": [float(x) for x in box],
+                    "mask_contour": mask_contour,
                     "reference_point": proj_res['cctv_ref_point'],
                     "sat_coords": sat_coords,
                     "have_heading": have_heading,
