@@ -16,6 +16,24 @@ def main():
 
     qdarktheme.setup_theme("dark")
 
+    app.setStyleSheet(app.styleSheet() + """
+        QCheckBox::indicator {
+            width: 14px;
+            height: 14px;
+            border: 1px solid #888;
+            border-radius: 2px;
+            background: #2b2b2b;
+        }
+        QCheckBox::indicator:checked {
+            background: #2a84ff;
+            border-color: #2a84ff;
+        }
+        QCheckBox::indicator:disabled {
+            background: #444;
+            border-color: #555;
+        }
+    """)
+
     win = MainWindow()
     win.show()
 

@@ -554,6 +554,7 @@ class InferenceTab(QWidget):
         
         # Setup Thread & Worker
         self.worker_thread = QThread()
+        self.worker_thread.setStackSize(64 * 1024 * 1024)  # 64MB: OpenBLAS parallel LU decomposition needs large stack
         self.current_worker = InferenceSession(
             location_code=loc,
             footage_path=mp4,
