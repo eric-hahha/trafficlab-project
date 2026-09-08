@@ -37,6 +37,7 @@ trafficlab-storage
 
 # Large local assets that should not be pushed
 models/*.pt
+models/*.pkl
 location/*/footage/*.mp4
 cad_models/
 

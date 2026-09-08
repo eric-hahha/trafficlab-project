@@ -146,7 +146,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 
 | Flag | 預設值 | 說明 |
 |------|---------|-------|
-| `--checkpoint` | `shufflenetv2k16-apollo-24` | PifPaf model |
+| `--checkpoint` | `models/shufflenetv2k16-apollo-24.pkl`（不存在時退回名稱 `shufflenetv2k16-apollo-24`，由 openpifpaf 從 torch.hub 下載到 `~/.cache/torch`） | PifPaf model |
 | `--cad-template` | *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON（如 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`）；設定時直接套用這個模板，取代 `build_car_template(dims)`，`prior_dimensions.json` 會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md` |
 | `--kp-conf` | `0.2` | 關鍵點信心度閾值 |
 | `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
@@ -359,6 +359,55 @@ python scripts/cctv_frame_picker_tool.py
 按「存成 CCTV 圖片」會寫到 `location/<location_code>/cctv_<location_code>.png`；若檔案已存在會先跳出確認覆寫對話框（無法復原，除非該檔案本身有版本控制）。
 
 核心程式碼：`trafficlab/gui/tools/cctv_frame_picker_tool.py`（GUI 本體，共用 `trafficlab/visualization/video_player.py` 的 `VideoPlayer` 與 `undistort_stage.py` 的 `ImageViewer`）；跳幀時沿用 `reference_point_calibration_tool.py` 的 seek-with-sequential-fallback 邏輯，因為部分 AV1 編碼的素材直接 seek 會靜默失敗。
+
+### 11. seg yolobox + wheel pair 修正工具
+
+獨立的 GUI 工具，把「seg tight-box 定位」到「wheel_pair 修正」串成一條三分頁的流程。使用者唯一要選的是 location，其餘（影片、config、G_projection）都自動解析。
+
+```bash
+source /opt/anaconda3/bin/activate trafficlab
+python scripts/seg_wheelpair_tool.py
+```
+
+| 分頁 | 內容 |
+|------|------|
+| `1. 推論` | 選 location（只列出同時有 `footage/*.mp4` 與 `G_projection_*.json` 的），按「執行 seg yolobox 推論」跑 `InferencePipeline`，完成後自動跳到分頁 2 |
+| `2. seg yolobox 結果` | 顯示 seg replay 的軌跡圖，下方「執行 wheel pair 修正」按鈕，完成後自動跳到分頁 3 |
+| `3. 修正前後對照` | 左右並排顯示修正前／後的軌跡圖，下方是逐 track 的修正報告 |
+
+| Flag | 說明 |
+|------|------|
+| `--location-code` | 開啟時預先選取的 location（預設：第一個可用的） |
+| `--config-name` | seg 推論要用的 config key（預設 `yolo_seg_tight_box_cpu`；不用 `seg_default` 是因為它綁 `device: mps`） |
+
+**分頁 2 的「執行 wheel pair 修正」實際做三件事**：
+
+1. 用 `trafficlab/trajectory/seg_mask_adapter.py` 把 seg replay 自己的 `mask_contour` 轉成 `record_car_masks.py` 的檔案格式，寫到 `output/car_masks/<code>/seg-mask_<stem>.from-replay.json.gz`
+2. 跑 `run_keypoints_openpifpaf.py --method segmentation --seg-masks-json <上面那份> --localizer wheel_pair`，輸出到 `output/wheel_pair/<code>/<stem>.from-seg-masks.json.gz` —— **因此 segmentation 模型整條流程只跑一次**（在步驟 1 的 seg 推論裡），log 會出現 `car-segmenter not loaded` 佐證。檔名帶 `.from-seg-masks` 是為了不覆蓋手動跑 `run_keypoints_openpifpaf.py` 產生在同一個資料夾的 `<stem>.json.gz`
+3. 呼叫 `correct_replay()`，輸出 `<stem>.wheelpair_corrected.json.gz`（放在 target replay 旁邊，不覆蓋原檔）
+
+工具全程不覆蓋任何既有檔案，唯一的例外是各 replay 旁邊的 `<stem>.trajectories.png` 軌跡圖（沿用 `trajectory_tools.py` 的預設輸出路徑，重跑會更新）。
+
+因為兩份 replay 的 `tracked_id` 都源自同一批 mask，修正預設用 **identity `track_id_map`**（只對應兩邊都有的 id）而不是 `sat_coords` 鄰近猜測。例外：若 target 出現 `tracked_id >= 500`，會跟 `run_keypoints_openpifpaf.py` 給未匹配 PifPaf 碎片的合成 id（per-frame index + 500）撞號，此時自動退回鄰近比對並在 log 標示。
+
+核心程式碼：`trafficlab/gui/tools/seg_wheelpair_tool.py`（GUI 本體，重用 `trafficlab/gui/inference_session.py` 的 `InferenceSession` 與 `undistort_stage.py` 的 `ImageViewer`）、`trafficlab/trajectory/seg_mask_adapter.py`（純資料轉換，CLI 版是 `scripts/replay_to_seg_masks.py`）。
+
+### 12. 把 seg replay 的 mask 轉成 car-segmenter 記錄
+
+`seg_wheelpair_tool.py` 步驟 1 的 CLI 版，也可單獨使用：讓 `--seg-masks-json` 重用 `run_inference.py` 已經算好的 mask，不必再跑一次 segmentation 模型。
+
+```bash
+source /opt/anaconda3/bin/activate trafficlab && \
+PYTHONPATH=$(pwd) python scripts/replay_to_seg_masks.py <seg_replay_json>
+```
+
+| Flag | 預設值 | 說明 |
+|------|--------|------|
+| `-o` / `--output` | 自動 | 預設 `output/car_masks/<code>/seg-mask_<stem>.from-replay.json.gz`（`.from-replay` 標記避免覆蓋真正的 `record_car_masks.py` 錄製檔） |
+| `--car-classes` | `car` | 要輸出成 car instance 的 replay `class` 值，逗號分隔。預設只有 `car`，與 `CarMaskSource` 寫死的 `classes=('car',)` 一致 —— PifPaf 用的是汽車關鍵點模型，讓 `two_wheeler` 的 mask 去搶那些關鍵點只會配錯 |
+| `--location-code` | 自動推斷 | 只影響輸出路徑 |
+
+輸入 replay 必須帶 `mask_contour`（只有 `model.type: "seg"` 的推論會產生）；沒有的話會直接報錯，而不是安靜地輸出一份空的 instance 記錄。
 
 ## 推論相關注意事項
 

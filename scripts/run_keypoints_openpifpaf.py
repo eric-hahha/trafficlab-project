@@ -50,6 +50,20 @@ from trafficlab.motion.keypoints_openpifpaf import (
 )
 from trafficlab.io.replay_writer import ReplayWriter
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _default_checkpoint() -> str:
+    """Prefer a local models/ copy over openpifpaf's torch.hub download.
+
+    openpifpaf resolves a bare name ('shufflenetv2k16-apollo-24') through
+    torch.hub into ~/.cache/torch, but loads a filesystem path as-is. Keeping
+    the .pkl in models/ next to the YOLO weights makes the checkout
+    self-contained; falls back to the name if the file is absent.
+    """
+    local = os.path.join(_REPO_ROOT, 'models', 'shufflenetv2k16-apollo-24.pkl')
+    return local if os.path.exists(local) else 'shufflenetv2k16-apollo-24'
+
 
 def _infer_location_code(g_proj_path: str) -> str:
     """Extract location code from path like .../location/<code>/G_projection_*.json."""
@@ -244,7 +258,7 @@ def main():
     parser.add_argument('--out',        default=None,
                         help='Output .json.gz path '
                              '(default: output/haware/<location>/<video_stem>.json.gz)')
-    parser.add_argument('--checkpoint', default='shufflenetv2k16-apollo-24')
+    parser.add_argument('--checkpoint', default=_default_checkpoint())
     parser.add_argument('--cad-template', default=None,
                         help='Path to a per-model keypoint template JSON from '
                              'scripts/build_cad_keypoint_template.py (e.g. '
