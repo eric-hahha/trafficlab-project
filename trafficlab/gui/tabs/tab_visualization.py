@@ -28,6 +28,7 @@ from trafficlab.visualization.sat_renderer import SatRenderer
 from trafficlab.visualization.replay_loader import ReplayLoader
 from trafficlab.visualization.svg_parser import SVGLayoutParser
 from trafficlab.gui.views import SatGraphicsView, CCTVGraphicsView
+from trafficlab.motion.trajectory_smoothing import smooth_savgol
 
 # --- Constants ---
 OUTPUT_DIR = "output"
@@ -74,6 +75,16 @@ class VisualizationTab(QWidget):
 
         self.text_color_mode = "White"
         self.speed_update_delay_frames = 30
+
+        self.show_trail = False
+        self.trail_len = 60
+        self.track_full_history = {}
+        self.use_sg_smooth = False
+        self.sg_window = 21
+        self.track_smoothed_history = {}
+        self._sg_cached_window = None
+        self.use_avg_speed = False
+        self.avg_speed_map = {}
         
         self.show_fov = False
         self.fov_fill_opacity = 25
@@ -81,6 +92,7 @@ class VisualizationTab(QWidget):
         self.has_3d_data = False
         self.show_3d = True
         self.show_label = True
+        self.show_mask = False
         self.face_opacity = 50
 
         self.svg_layer_groups = {} 
@@ -181,6 +193,26 @@ class VisualizationTab(QWidget):
         sat_vis_layout = QVBoxLayout()
         self.chk_sat_box = QCheckBox("Floor Box"); self.chk_sat_box.setChecked(True)
         self.chk_sat_box.toggled.connect(self.update_ui_state)
+        self.chk_trail = QCheckBox("Show Trail")
+        self.chk_trail.setChecked(False)
+        self.chk_trail.toggled.connect(self.update_ui_state)
+        trail_row = QHBoxLayout()
+        trail_row.addWidget(QLabel("Trail Frames:"))
+        self.slider_trail_len = QSlider(Qt.Horizontal)
+        self.slider_trail_len.setRange(10, 300)
+        self.slider_trail_len.setValue(60)
+        self.slider_trail_len.valueChanged.connect(self.update_ui_state)
+        trail_row.addWidget(self.slider_trail_len)
+        self.chk_sg_smooth = QCheckBox("SG Smooth")
+        self.chk_sg_smooth.setChecked(False)
+        self.chk_sg_smooth.toggled.connect(self.update_ui_state)
+        sg_row = QHBoxLayout()
+        sg_row.addWidget(QLabel("SG Window:"))
+        self.slider_sg_window = QSlider(Qt.Horizontal)
+        self.slider_sg_window.setRange(5, 101)
+        self.slider_sg_window.setValue(21)
+        self.slider_sg_window.valueChanged.connect(self.update_ui_state)
+        sg_row.addWidget(self.slider_sg_window)
         # --- NEW: Coords Dot Checkbox ---
         self.chk_sat_coords = QCheckBox("Show Coords Dot")
         self.chk_sat_coords.setChecked(True)
@@ -193,12 +225,20 @@ class VisualizationTab(QWidget):
         self.chk_sat_keypoints = QCheckBox("Show Keypoints")
         self.chk_sat_keypoints.setChecked(self.show_sat_keypoints)
         self.chk_sat_keypoints.toggled.connect(self.update_ui_state)
+        self.chk_avg_speed = QCheckBox("Avg Speed")
+        self.chk_avg_speed.setChecked(False)
+        self.chk_avg_speed.toggled.connect(self.update_ui_state)
         # Add widgets to layout
         sat_vis_layout.addWidget(self.chk_sat_box)
+        sat_vis_layout.addWidget(self.chk_trail)
+        sat_vis_layout.addLayout(trail_row)
+        sat_vis_layout.addWidget(self.chk_sg_smooth)
+        sat_vis_layout.addLayout(sg_row)
         sat_vis_layout.addWidget(self.chk_sat_coords)
         sat_vis_layout.addWidget(self.chk_sat_arrow)
         sat_vis_layout.addWidget(self.chk_sat_label)
         sat_vis_layout.addWidget(self.chk_sat_keypoints)
+        sat_vis_layout.addWidget(self.chk_avg_speed)
         
         th_lay = QHBoxLayout()
         th_lay.addWidget(QLabel("Box Thick:"))
@@ -271,6 +311,11 @@ class VisualizationTab(QWidget):
         self.chk_cctv_label.setChecked(True)
         self.chk_cctv_label.toggled.connect(self.update_ui_state)
         cctv_layout.addWidget(self.chk_cctv_label)
+
+        self.chk_cctv_mask = QCheckBox("Mask Contour instead of Box (2D Mode)")
+        self.chk_cctv_mask.setChecked(False)
+        self.chk_cctv_mask.toggled.connect(self.update_ui_state)
+        cctv_layout.addWidget(self.chk_cctv_mask)
 
         self.chk_roi = QCheckBox("Show ROI (Red = Outside)")
         self.chk_roi.setChecked(self.show_roi)
@@ -493,6 +538,19 @@ class VisualizationTab(QWidget):
             self.json_frame_map = {f["frame_index"]: f["objects"] for f in data.get("frames", [])}
             self.current_frame_idx = 0
 
+            track_history = {}
+            for f in data.get("frames", []):
+                fi = f["frame_index"]
+                for obj in f.get("objects", []):
+                    tid = obj.get("tracked_id")
+                    coord = obj.get("sat_coords")
+                    cls = obj.get("class", "?")
+                    if tid is not None and coord is not None:
+                        if tid not in track_history:
+                            track_history[tid] = (cls, [])
+                        track_history[tid][1].append((fi, coord))
+            self.track_full_history = track_history
+
             self.has_3d_data = False
             for f in data.get("frames", [])[:50]:
                 for o in f.get("objects", []):
@@ -513,6 +571,7 @@ class VisualizationTab(QWidget):
             self.progress_bar.setRange(0, max_frames - 1)
 
             self.speed_display_cache = {}
+            self.avg_speed_map = self._compute_avg_speed_map(data)
             self.actual_fps = 0.0
             self.last_real_time = 0
             self.update_frame()
@@ -544,6 +603,82 @@ class VisualizationTab(QWidget):
             except Exception:
                 pass
 
+    def _compute_avg_speed_map(self, data: dict) -> dict:
+        """每個 track 計算平均速度（路徑總長 / 總時間），單位 km/h。"""
+        fps = data.get('meta', {}).get('fps', 30.0)
+        if fps <= 0:
+            fps = 30.0
+        px_per_m = 1.0
+        if self.g_data:
+            px_per_m = self.g_data.get('parallax', {}).get('px_per_meter', 1.0) or 1.0
+
+        avg_map = {}
+        for tid, (cls, entries) in self.track_full_history.items():
+            if len(entries) < 2:
+                continue
+            frame_indices = [fi for fi, _ in entries]
+            coords = [coord for _, coord in entries]
+
+            path_px = sum(
+                math.hypot(coords[k][0] - coords[k-1][0], coords[k][1] - coords[k-1][1])
+                for k in range(1, len(coords))
+            )
+            total_seconds = (frame_indices[-1] - frame_indices[0]) / fps
+            if total_seconds <= 0:
+                continue
+            avg_map[tid] = (path_px / px_per_m / total_seconds) * 3.6
+        return avg_map
+
+    def _ensure_smoothed_history(self):
+        """確保 SG 平滑結果已算好並快取（每次載入／改 window 才重算一次）。"""
+        if self.track_smoothed_history or not self.track_full_history:
+            return
+        smoothed = {}
+        for tid, (_cls, entries) in self.track_full_history.items():
+            if len(entries) < 2:
+                continue
+            coords = [coord for _fi, coord in entries]
+            arr = smooth_savgol(coords, self.sg_window, 2)
+            smoothed[tid] = {
+                fi: (float(arr[k][0]), float(arr[k][1]))
+                for k, (fi, _coord) in enumerate(entries)
+            }
+        self.track_smoothed_history = smoothed
+        self._sg_cached_window = self.sg_window
+
+    def _apply_sg_to_objects(self, objects: list) -> list:
+        """把 SAT 標記平移到 SG 平滑後的位置。
+
+        回傳淺拷貝的新 list —— json_frame_map 裡的原始物件同時也給 CCTV
+        繪製使用，不能就地修改。heading／speed_kmh 這類非位置欄位不動，
+        帶座標的欄位（sat_floor_box、kp_sat）跟著整體平移同一個位移量。
+        """
+        patched = []
+        for obj in objects:
+            tid = obj.get("tracked_id")
+            coord_key = "sat_coords" if obj.get("sat_coords") else "sat_coord"
+            coord = obj.get(coord_key)
+            smoothed = self.track_smoothed_history.get(tid) if tid is not None else None
+            new_xy = smoothed.get(self.current_frame_idx) if smoothed else None
+            if new_xy is None or not coord:
+                patched.append(obj)
+                continue
+            dx = new_xy[0] - coord[0]
+            dy = new_xy[1] - coord[1]
+            o = dict(obj)
+            o[coord_key] = [new_xy[0], new_xy[1]]
+            if o.get("sat_center"):
+                o["sat_center"] = [new_xy[0], new_xy[1]]
+            if o.get("sat_floor_box"):
+                o["sat_floor_box"] = [[p[0] + dx, p[1] + dy] for p in o["sat_floor_box"]]
+            if o.get("kp_sat"):
+                o["kp_sat"] = [
+                    None if kp is None else [kp[0] + dx, kp[1] + dy, *list(kp[2:])]
+                    for kp in o["kp_sat"]
+                ]
+            patched.append(o)
+        return patched
+
     def _reset_loaded_media(self):
         if self.player:
             try:
@@ -572,6 +707,10 @@ class VisualizationTab(QWidget):
         self.sat_view.setTransform(QTransform())
         self.svg_layer_groups = {}
         self.speed_display_cache = {}
+        self.track_full_history = {}
+        self.track_smoothed_history = {}
+        self._sg_cached_window = None
+        self.avg_speed_map = {}
         if hasattr(self, 'sat_count_label'):
             self.sat_count_label.hide()
 
@@ -946,8 +1085,16 @@ class VisualizationTab(QWidget):
         self.sat_box_thick = self.slider_sat_thick.value()
         self.show_sat_label = self.chk_sat_label.isChecked()
         self.show_sat_keypoints = self.chk_sat_keypoints.isChecked()
+        self.use_avg_speed = self.chk_avg_speed.isChecked()
         self.sat_label_size = self.slider_sat_text.value()
         self.show_sat_box = self.chk_sat_box.isChecked()
+        self.show_trail = self.chk_trail.isChecked()
+        self.trail_len = self.slider_trail_len.value()
+        self.use_sg_smooth = self.chk_sg_smooth.isChecked()
+        self.sg_window = self.slider_sg_window.value()
+        # window 改了就丟掉快取，下次繪製時重算
+        if self.sg_window != self._sg_cached_window:
+            self.track_smoothed_history = {}
         # --- NEW: Update State ---
         self.show_sat_coords_dot = self.chk_sat_coords.isChecked()
         self.show_sat_arrow = self.chk_sat_arrow.isChecked()
@@ -956,6 +1103,7 @@ class VisualizationTab(QWidget):
         self.show_3d = self.chk_3d_box.isChecked()
         self.face_opacity = self.slider_3d_alpha.value()
         self.show_label = self.chk_cctv_label.isChecked()
+        self.show_mask = self.chk_cctv_mask.isChecked()
         self.show_roi = self.chk_roi.isChecked()
         
         # Toggle ROI overlay visibility
@@ -1053,6 +1201,7 @@ class VisualizationTab(QWidget):
             box_thickness=self.box_thickness,
             face_opacity=self.face_opacity,
             show_label=self.show_label,
+            show_mask=self.show_mask,
         )
         if getattr(self, 'cctv_pixmap_item', None) is not None:
             self.cctv_pixmap_item.setPixmap(pix)
@@ -1078,6 +1227,24 @@ class VisualizationTab(QWidget):
             sr = self.sat_scene.sceneRect()
             scene_w, scene_h = max(1, int(sr.width())), max(1, int(sr.height()))
 
+        if self.use_sg_smooth:
+            self._ensure_smoothed_history()
+            objects = self._apply_sg_to_objects(objects)
+
+        # Build trail data for current frame window
+        trail_data = {}
+        if self.show_trail and self.track_full_history:
+            min_frame = self.current_frame_idx - self.trail_len
+            sg_all = self.track_smoothed_history if self.use_sg_smooth else None
+            for tid, (cls, entries) in self.track_full_history.items():
+                seed = f"{cls}_{tid}" if self.show_tracking else cls
+                sg = sg_all.get(tid) if sg_all else None
+                pts = [sg.get(fi, coord) if sg else coord
+                       for fi, coord in entries
+                       if min_frame <= fi <= self.current_frame_idx]
+                if len(pts) >= 2:
+                    trail_data[seed] = pts
+
         # Render all objects into a single transparent pixmap (O(1) scene update).
         pix = self.sat_renderer.render(
             objects, scene_w, scene_h,
@@ -1095,6 +1262,10 @@ class VisualizationTab(QWidget):
             speed_display_cache=self.speed_display_cache,
             speed_update_delay_frames=self.speed_update_delay_frames,
             current_frame_idx=self.current_frame_idx,
+            show_trail=self.show_trail,
+            trail_data=trail_data,
+            use_avg_speed=self.use_avg_speed,
+            avg_speed_map=self.avg_speed_map,
         )
         if getattr(self, 'sat_dyn_item', None) is not None:
             self.sat_dyn_item.setPixmap(pix)

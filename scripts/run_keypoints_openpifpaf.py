@@ -50,6 +50,31 @@ from trafficlab.motion.keypoints_openpifpaf import (
 )
 from trafficlab.io.replay_writer import ReplayWriter
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _default_checkpoint() -> str:
+    """Prefer a local models/ copy over openpifpaf's torch.hub download.
+
+    openpifpaf resolves a bare name ('shufflenetv2k16-apollo-24') through
+    torch.hub into ~/.cache/torch, but loads a filesystem path as-is. Keeping
+    the .pkl in models/ next to the YOLO weights makes the checkout
+    self-contained; falls back to the name if the file is absent.
+    """
+    local = os.path.join(_REPO_ROOT, 'models', 'shufflenetv2k16-apollo-24.pkl')
+    return local if os.path.exists(local) else 'shufflenetv2k16-apollo-24'
+
+
+# --localizer wheel_pair projects the two wheel keypoints at their template
+# height; build_car_template() pins wheels to h=0, which (through the h=0 ground
+# homography, at grazing camera angles) throws the fitted position ~1-1.5 m
+# forward. This committed CAD template carries the real wheel-hub height
+# (~0.34 m), removing that bias — so wheel_pair defaults to it. Override with an
+# explicit --cad-template PATH, or --cad-template "" to force build_car_template.
+_DEFAULT_WHEEL_PAIR_TEMPLATE = os.path.join(
+    _REPO_ROOT, 'cad_models', 'nissan_juke_nismo',
+    'keypoint_template_nissan_juke_nismo.json')
+
 
 def _infer_location_code(g_proj_path: str) -> str:
     """Extract location code from path like .../location/<code>/G_projection_*.json."""
@@ -244,13 +269,16 @@ def main():
     parser.add_argument('--out',        default=None,
                         help='Output .json.gz path '
                              '(default: output/haware/<location>/<video_stem>.json.gz)')
-    parser.add_argument('--checkpoint', default='shufflenetv2k16-apollo-24')
+    parser.add_argument('--checkpoint', default=_default_checkpoint())
     parser.add_argument('--cad-template', default=None,
                         help='Path to a per-model keypoint template JSON from '
                              'scripts/build_cad_keypoint_template.py (e.g. '
                              'cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json). '
                              'When set, this exact 24-keypoint template is used directly instead of '
-                             'build_car_template(dims) — prior_dimensions.json is ignored.')
+                             'build_car_template(dims) — prior_dimensions.json is ignored. '
+                             '--localizer wheel_pair defaults this to the committed '
+                             'nissan_juke_nismo template (real wheel-hub height); pass '
+                             '--cad-template "" to opt back out to build_car_template.')
     parser.add_argument('--kp-conf',    type=float, default=0.2)
     parser.add_argument('--frames',          type=int,   default=-1,  help='-1 = all')
     parser.add_argument('--pifpaf-threshold', type=float, default=0.01,
@@ -311,8 +339,22 @@ def main():
                              '(OpenPifPafKeypointsLocalizer.localize_reprojection); '
                              'wheel_pair = position/heading from a single same-side front/rear '
                              'wheel pair only, ignoring every other keypoint '
-                             '(OpenPifPafKeypointsLocalizer.localize_wheel_pair)')
+                             '(OpenPifPafKeypointsLocalizer.localize_wheel_pair); defaults '
+                             '--cad-template to the committed nissan_juke_nismo template')
     args = parser.parse_args()
+
+    # wheel_pair defaults --cad-template to the committed nissan_juke_nismo
+    # template. `None` = not passed (apply the default); `""` = explicit opt-out
+    # (fall through to build_car_template in the resolution block below).
+    if args.localizer == 'wheel_pair' and args.cad_template is None:
+        if os.path.exists(_DEFAULT_WHEEL_PAIR_TEMPLATE):
+            args.cad_template = _DEFAULT_WHEEL_PAIR_TEMPLATE
+            print('[haware] wheel_pair: --cad-template defaults to '
+                  f'{os.path.relpath(_DEFAULT_WHEEL_PAIR_TEMPLATE, _REPO_ROOT)} '
+                  '(pass --cad-template "" to use build_car_template instead)')
+        else:
+            print('[haware] wheel_pair: default CAD template missing at '
+                  f'{_DEFAULT_WHEEL_PAIR_TEMPLATE} — falling back to build_car_template')
 
     if args.method == 'geometric' and not args.yolo and not args.yolo_boxes_json:
         print('[haware] --method geometric but --yolo is empty: no track-ID matching '

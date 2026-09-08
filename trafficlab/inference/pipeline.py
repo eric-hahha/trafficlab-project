@@ -8,8 +8,8 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
-from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
-from trafficlab.motion.segmentation_car import mask_to_tight_bbox
+from trafficlab.motion.kinematics import TrackSmoother, KalmanTrackSmoother, MotorcycleLateralCorrector
+from trafficlab.motion.segmentation_car import mask_to_polygon, polygon_tight_bbox
 from trafficlab.io.replay_writer import ReplayWriter
 
 
@@ -281,9 +281,11 @@ class InferencePipeline:
             for j, box in enumerate(boxes):
                 cls_name = r.names[int(cls_ids[j])]
 
+                mask_contour = None  # image-space [[x,y],...] polygon, seg mode only
                 if is_seg:
                     if masks_data is not None and j < len(masks_data):
-                        tight = mask_to_tight_bbox(masks_data[j].astype(bool))
+                        mask_contour = mask_to_polygon(masks_data[j].astype(bool))
+                        tight = polygon_tight_bbox(mask_contour)
                         if tight is not None:
                             box = np.array(tight, dtype=box.dtype)
                         else:
@@ -336,10 +338,18 @@ class InferencePipeline:
                         vehicle_class = cls_name.strip().lower()
                         kinematics_config = full_config['kinematics']
                         
-                        # 檢查是否啟用橫向修正且為機車類別
                         lateral_config = kinematics_config.get('lateral_correction', {})
-                        if (lateral_config.get('enabled', False) and
-                            vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
+
+                        # Kalman 取代 EMA 路徑。注意它會回傳 corrected_position，
+                        # 下方會用來取代 sat_coords —— 另兩個 smoother 不回傳該欄位，
+                        # 所以開啟 Kalman 會同時改變位置，不只是速度與朝向。
+                        # 預設關閉：q_accel 預設值會讓速度低估約一半，
+                        # 詳見 backlog/kalman-q-matrix-speed-underestimate.md
+                        if kinematics_config.get('use_kalman', False):
+                            track_smoothers[tid] = KalmanTrackSmoother(kinematics_config)
+                        # 檢查是否啟用橫向修正且為機車類別
+                        elif (lateral_config.get('enabled', False) and
+                              vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
                             track_smoothers[tid] = MotorcycleLateralCorrector(kinematics_config, vehicle_class)
                         else:
                             track_smoothers[tid] = TrackSmoother(kinematics_config)
@@ -367,6 +377,19 @@ class InferencePipeline:
                 have_heading = (heading is not None)
                 if not have_heading: speed = 0.0
 
+                # 3b. Footprint anchor -> geometric centre (seg tight-box only)
+                # mask 底部中心落在「面向相機那一側」的接地輪廓上，不是 footprint 中心；
+                # 拿它當 floor box 中心會讓整個框往相機方向偏。放在 smoother 之後：
+                # 這個偏移對同一台車緩慢變化，不會污染速度與 heading。不以 have_heading
+                # 為條件——否則 heading 首次出現的那一幀會一次補上整段位移；heading 為
+                # None 時 footprint_anchor_to_center 內建等向 fallback。
+                if is_seg and have_measurements:
+                    centered = g_engine.footprint_anchor_to_center(
+                        sat_coords, heading, dims['width'], dims['length']
+                    )
+                    if centered is not None:
+                        sat_coords = centered
+
                 # 4. 3D Lifting
                 sat_floor_box = None
                 bbox_3d = None
@@ -390,6 +413,7 @@ class InferencePipeline:
                     "class": cls_name,
                     "confidence": float(confs[j]),
                     "bbox_2d": [float(x) for x in box],
+                    "mask_contour": mask_contour,
                     "reference_point": proj_res['cctv_ref_point'],
                     "sat_coords": sat_coords,
                     "have_heading": have_heading,

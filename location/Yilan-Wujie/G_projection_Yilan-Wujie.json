@@ -1,0 +1,158 @@
+{
+    "meta": {
+        "location_code": "Yilan-Wujie",
+        "timestamp": "2026-07-10T16:40:58"
+    },
+    "inputs": {
+        "cctv_path": "cctv_Yilan-Wujie.png",
+        "sat_path": "sat_Yilan-Wujie.png",
+        "layout_path": "layout_Yilan-Wujie.svg",
+        "roi_path": "roi_Yilan-Wujie.png",
+        "note": "Input paths are relative to this json file"
+    },
+    "undistort": {
+        "resolution": [
+            1280,
+            720
+        ],
+        "K": [
+            [
+                1280.0,
+                0.0,
+                640.0
+            ],
+            [
+                0.0,
+                1280.0,
+                360.0
+            ],
+            [
+                0.0,
+                0.0,
+                1.0
+            ]
+        ],
+        "D": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        "model": "radial_tangential"
+    },
+    "homography": {
+        "H": [
+            [
+                -13.220808130192015,
+                49.7025228256067,
+                19137.266659325458
+            ],
+            [
+                20.621253301751885,
+                112.37408342339396,
+                -1679.9295933769388
+            ],
+            [
+                -0.008332417123312145,
+                0.24530176517717367,
+                1.0
+            ]
+        ],
+        "fov_polygon": [
+            [
+                419.0,
+                436.0
+            ],
+            [
+                344.0,
+                619.0
+            ],
+            [
+                1878.0,
+                2507.0
+            ],
+            [
+                2507.0,
+                2507.0
+            ],
+            [
+                2507.0,
+                167.0
+            ]
+        ],
+        "anchors_list": [
+            {
+                "id": 0,
+                "name": "Pair 0",
+                "coords_cctv": [
+                    115.92187141203934,
+                    154.3371854562623
+                ],
+                "coords_sat": [
+                    667.0216363527854,
+                    476.4440259662754
+                ]
+            },
+            {
+                "id": 1,
+                "name": "Pair 1",
+                "coords_cctv": [
+                    409.7821256183606,
+                    132.0174373770492
+                ],
+                "coords_sat": [
+                    676.7254431811614,
+                    720.9173528360043
+                ]
+            },
+            {
+                "id": 2,
+                "name": "Pair 2",
+                "coords_cctv": [
+                    534.514059257715,
+                    179.84405274258717
+                ],
+                "coords_sat": [
+                    516.6770770478715,
+                    726.7727808652705
+                ]
+            },
+            {
+                "id": 3,
+                "name": "Pair 3",
+                "coords_cctv": [
+                    282.84486005018016,
+                    212.9087106113133
+                ],
+                "coords_sat": [
+                    510.7111692444677,
+                    551.9569515889877
+                ]
+            }
+        ]
+    },
+    "parallax": {
+        "x_cam_coords_sat": 0.0,
+        "y_cam_coords_sat": 0.0,
+        "z_cam_meters": 0.0,
+        "scale": {
+            "measured_px": 244.6658362291633,
+            "real_m": 8.3,
+            "reference_anchors": [
+                "Pair 0",
+                "Pair 1"
+            ]
+        },
+        "px_per_meter": 29.477811593875092
+    },
+    "use_svg": false,
+    "layout_svg": {
+        "A": [],
+        "association_pairs": []
+    },
+    "use_roi": false,
+    "roi_method": "partial",
+    "ref_method": "center_box",
+    "proj_method": "down_h_2"
+}

@@ -40,7 +40,8 @@ class CCTRenderer:
                show_3d=True,
                box_thickness=2,
                face_opacity=50,
-               show_label=True):
+               show_label=True,
+               show_mask=False):
         """Render tracked-object overlays onto *frame* and return a QPixmap.
 
         Parameters
@@ -59,6 +60,10 @@ class CCTRenderer:
             Alpha (0-255) for 3D face fill colour.
         show_label : bool
             Annotate each box with its class / track-ID label.
+        show_mask : bool
+            In 2D mode, draw the segmentation ``mask_contour`` polygon instead
+            of the ``bbox_2d`` rectangle for objects that carry one (seg-mode
+            replays). Falls back to the rectangle when an object has no contour.
 
         Returns
         -------
@@ -107,10 +112,48 @@ class CCTRenderer:
                 except Exception:
                     pass
 
-            # 2D MODE
+            # 2D MODE — mask contour and bbox rectangle are independent,
+            # mutually-exclusive branches: with show_mask on, an object that
+            # carries a mask_contour is drawn as that polygon; otherwise (or
+            # when it has no contour) it falls back to the bbox_2d rectangle.
+            # Each branch draws its own shape, reference point and label.
             elif not show_3d:
+                mask_contour = obj.get("mask_contour")
                 bbox = obj.get("bbox_2d")
-                if bbox:
+
+                if show_mask and mask_contour and len(mask_contour) >= 3:
+                    poly = QPolygonF([QPointF(p[0], p[1]) for p in mask_contour])
+                    painter.setPen(QPen(col, box_thickness))
+                    fill = QColor(col)
+                    fill.setAlpha(face_opacity)
+                    painter.setBrush(QBrush(fill))
+                    painter.drawPolygon(poly)
+
+                    # Reference point when heading unknown but measurements present
+                    if (not have_heading) and have_measurements:
+                        ref_pt = obj.get("reference_point")
+                        if ref_pt:
+                            rx, ry = ref_pt
+                            painter.setBrush(QBrush(col))
+                            painter.drawEllipse(QPointF(rx, ry), 4, 4)
+
+                    if show_label:
+                        x1 = int(min(p[0] for p in mask_contour))
+                        y1 = int(min(p[1] for p in mask_contour))
+                        conf = obj.get("confidence")
+                        conf_str = f" {conf:.2f}" if conf is not None else ""
+                        n_kp = obj.get("n_keypoints")
+                        kp_str = f" kp={n_kp}" if n_kp is not None else ""
+                        method = obj.get("method")
+                        method_str = f" m{method}" if method is not None else ""
+                        lbl_2d = f"{lbl}{conf_str}{kp_str}{method_str}"
+                        painter.setPen(QPen(Qt.white))
+                        fm = painter.fontMetrics()
+                        tw, th = fm.width(lbl_2d), fm.height()
+                        painter.fillRect(QRectF(x1, y1 - th, tw + 4, th), col)
+                        painter.drawText(QPointF(x1 + 2, y1 - 2), lbl_2d)
+
+                elif bbox:
                     x1, y1, x2, y2 = map(int, bbox)
                     rect = QRectF(x1, y1, x2 - x1, y2 - y1)
                     painter.setPen(QPen(col, box_thickness))
