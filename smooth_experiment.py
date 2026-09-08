@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from scipy.signal import savgol_filter
+from trafficlab.motion.trajectory_smoothing import smooth_savgol
 
 
 MIN_TRACK_LEN = 5  # 幀數太少的 track 跳過不顯示
@@ -57,21 +57,6 @@ def extract_trajectories(data: dict) -> dict:
 
 
 # ── 平滑演算法 ─────────────────────────────────────────────────────────────────
-
-def smooth_savgol(coords: list, window: int, poly: int) -> np.ndarray:
-    """Savitzky-Golay filter：對 x, y 分別做多項式擬合平滑。"""
-    arr = np.array(coords, dtype=float)
-    n = len(arr)
-    # window 必須是奇數且 > poly，不能超過資料長度
-    w = min(window, n if n % 2 == 1 else n - 1)
-    w = max(w, poly + 2 if (poly + 2) % 2 == 1 else poly + 3)
-    if w > n:
-        return arr
-    return np.stack([
-        savgol_filter(arr[:, 0], w, poly),
-        savgol_filter(arr[:, 1], w, poly),
-    ], axis=1)
-
 
 def smooth_moving_average(coords: list, window: int) -> np.ndarray:
     """移動平均：對 x, y 分別做等權重滑動平均。"""
