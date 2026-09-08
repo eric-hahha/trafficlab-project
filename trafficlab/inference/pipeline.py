@@ -8,7 +8,7 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from trafficlab.projection.g_projection import GProjection
-from trafficlab.motion.kinematics import TrackSmoother, MotorcycleLateralCorrector
+from trafficlab.motion.kinematics import TrackSmoother, KalmanTrackSmoother, MotorcycleLateralCorrector
 from trafficlab.motion.segmentation_car import mask_to_polygon, polygon_tight_bbox
 from trafficlab.io.replay_writer import ReplayWriter
 
@@ -338,10 +338,18 @@ class InferencePipeline:
                         vehicle_class = cls_name.strip().lower()
                         kinematics_config = full_config['kinematics']
                         
-                        # 檢查是否啟用橫向修正且為機車類別
                         lateral_config = kinematics_config.get('lateral_correction', {})
-                        if (lateral_config.get('enabled', False) and
-                            vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
+
+                        # Kalman 取代 EMA 路徑。注意它會回傳 corrected_position，
+                        # 下方會用來取代 sat_coords —— 另兩個 smoother 不回傳該欄位，
+                        # 所以開啟 Kalman 會同時改變位置，不只是速度與朝向。
+                        # 預設關閉：q_accel 預設值會讓速度低估約一半，
+                        # 詳見 backlog/kalman-q-matrix-speed-underestimate.md
+                        if kinematics_config.get('use_kalman', False):
+                            track_smoothers[tid] = KalmanTrackSmoother(kinematics_config)
+                        # 檢查是否啟用橫向修正且為機車類別
+                        elif (lateral_config.get('enabled', False) and
+                              vehicle_class in lateral_config.get('vehicle_classes', ['motor', 'two_wheeler'])):
                             track_smoothers[tid] = MotorcycleLateralCorrector(kinematics_config, vehicle_class)
                         else:
                             track_smoothers[tid] = TrackSmoother(kinematics_config)
