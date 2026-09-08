@@ -235,6 +235,9 @@ class WheelPairWorker(QObject):
         wp_out = REPO_ROOT / "output" / "wheel_pair" / str(
             self.target_replay.parent.name
         ) / f"{self.video_path.stem}.from-seg-masks.json.gz"
+        # No --cad-template here on purpose: run_keypoints_openpifpaf.py defaults
+        # --localizer wheel_pair to the committed nissan_juke_nismo template
+        # (real wheel-hub height), and this tool follows that default.
         cmd = [
             sys.executable,
             str(REPO_ROOT / "scripts" / "run_keypoints_openpifpaf.py"),

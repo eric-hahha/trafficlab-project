@@ -44,9 +44,14 @@ scale_ratio = 實際前後輪距離（公尺，sat 空間投影後換算） / �
 ## 目前預設值
 
 ```
---localizer  wheel_pair
---kp-conf    0.2（沿用全域門檻，不另外設定）
-confidence   固定 0.4（flat placeholder，量級對齊 localize_reprojection Method 2）
+--localizer     wheel_pair
+--cad-template  cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json（wheel_pair 的預設，見下）
+--kp-conf       0.2（沿用全域門檻，不另外設定）
+confidence      固定 0.4（flat placeholder，量級對齊 localize_reprojection Method 2）
 ```
+
+### 為什麼 wheel_pair 預設吃 CAD 模板
+
+`build_car_template(dims)` 把前後輪關鍵點釘在 `h=0`（接地假設）。但 PifPaf Apollo-24 的 `*_wheel_center` 實際落在輪轂中心（約 0.34 m 高），`localize_wheel_pair` 又用模板高度去投影這兩個點——高度差讓擬合位置沿視線被推離相機，在本專案的掠射視角下約 1~1.5 m（實測 Hsinchu1：wheel_pair 比 seg tight-box footprint 中心前 ~1.47 m）。已入庫的 `keypoint_template_nissan_juke_nismo.json` 帶真實輪轂高度 0.341 m，套用後該偏移降到 ~0.07 m。因此 `run_keypoints_openpifpaf.py` 在 `--localizer wheel_pair` 且未帶 `--cad-template` 時自動填入這個模板；要改回 `build_car_template`，明確傳 `--cad-template ""`。模板檔透過 `.gitignore` negation 入庫（CAD mesh 本身仍不入庫）。
 
 輸出路徑：`output/wheel_pair/<location_code>/<video_stem>.json.gz`（跟 `procrustes`/`reprojection` 共用的 `output/haware/...` 分開，避免同一支影片、沒指定 `--out` 時互相覆蓋）。

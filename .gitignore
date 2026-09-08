@@ -39,7 +39,12 @@ trafficlab-storage
 models/*.pt
 models/*.pkl
 location/*/footage/*.mp4
-cad_models/
+# CAD meshes stay local; the small derived keypoint templates are committed
+# (run_keypoints_openpifpaf.py defaults --localizer wheel_pair to one of them).
+cad_models/*
+!cad_models/*/
+cad_models/*/*
+!cad_models/*/keypoint_template_*.json
 
 # Ultralytics auto-downloaded checkpoints (e.g. car-segmenter's yolo11n-seg.pt)
 # land in the CWD when given a bare model name instead of a path

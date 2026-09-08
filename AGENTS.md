@@ -147,11 +147,11 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/run_keypoints_openpifpaf.py \
 | Flag | 預設值 | 說明 |
 |------|---------|-------|
 | `--checkpoint` | `models/shufflenetv2k16-apollo-24.pkl`（不存在時退回名稱 `shufflenetv2k16-apollo-24`，由 openpifpaf 從 torch.hub 下載到 `~/.cache/torch`） | PifPaf model |
-| `--cad-template` | *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON（如 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`）；設定時直接套用這個模板，取代 `build_car_template(dims)`，`prior_dimensions.json` 會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md` |
+| `--cad-template` | `--localizer wheel_pair` 時預設為已入庫的 `cad_models/nissan_juke_nismo/keypoint_template_nissan_juke_nismo.json`（帶真實輪轂高度）；其他 localizer 為 *(無)* | 指向 `scripts/build_cad_keypoint_template.py` 產出的車型專屬 24 點模板 JSON；設定時直接套用這個模板，取代 `build_car_template(dims)`，`prior_dimensions.json` 會被忽略。載入時會檢查模板的 `kp_names` 是否跟目前的 `KP_NAMES` 順序一致，不一致就報錯要求重新產生 — 完整流程見 `docs/cad-keypoint-template-pipeline.md`。要在 wheel_pair 下改回 `build_car_template`，明確傳 `--cad-template ""` |
 | `--kp-conf` | `0.2` | 關鍵點信心度閾值 |
 | `--frames` | `-1`（全部） | 限制幀數以便快速測試 |
 | `--start-frame` | `0` | 開始處理的第一幀；在此之前的幀會被讀取後丟棄，而不是用 seek |
-| `--localizer` | `procrustes` | `procrustes`（closed-form 擬合，一般情況）、`reprojection`（非線性最小平方，對 PifPaf 像素位置擬合），或 `wheel_pair`（只用同側前後輪關鍵點，適合僅輪胎清楚可見時 — 詳見 `docs/keypoints-openpifpaf-wheel-pair-localizer.md`） |
+| `--localizer` | `procrustes` | `procrustes`（closed-form 擬合，一般情況）、`reprojection`（非線性最小平方，對 PifPaf 像素位置擬合），或 `wheel_pair`（只用同側前後輪關鍵點，適合僅輪胎清楚可見時；會把 `--cad-template` 預設為 nissan_juke_nismo 模板 —— 見上 — 詳見 `docs/keypoints-openpifpaf-wheel-pair-localizer.md`） |
 | `--out` | 自動 | 覆寫輸出路徑 |
 
 `--method geometric` 選項：
@@ -383,7 +383,7 @@ python scripts/seg_wheelpair_tool.py
 **分頁 2 的「執行 wheel pair 修正」實際做三件事**：
 
 1. 用 `trafficlab/trajectory/seg_mask_adapter.py` 把 seg replay 自己的 `mask_contour` 轉成 `record_car_masks.py` 的檔案格式，寫到 `output/car_masks/<code>/seg-mask_<stem>.from-replay.json.gz`
-2. 跑 `run_keypoints_openpifpaf.py --method segmentation --seg-masks-json <上面那份> --localizer wheel_pair`，輸出到 `output/wheel_pair/<code>/<stem>.from-seg-masks.json.gz` —— **因此 segmentation 模型整條流程只跑一次**（在步驟 1 的 seg 推論裡），log 會出現 `car-segmenter not loaded` 佐證。檔名帶 `.from-seg-masks` 是為了不覆蓋手動跑 `run_keypoints_openpifpaf.py` 產生在同一個資料夾的 `<stem>.json.gz`
+2. 跑 `run_keypoints_openpifpaf.py --method segmentation --seg-masks-json <上面那份> --localizer wheel_pair`（不傳 `--cad-template`，沿用 wheel_pair 的預設 nissan_juke_nismo 模板），輸出到 `output/wheel_pair/<code>/<stem>.from-seg-masks.json.gz` —— **因此 segmentation 模型整條流程只跑一次**（在步驟 1 的 seg 推論裡），log 會出現 `car-segmenter not loaded` 佐證。檔名帶 `.from-seg-masks` 是為了不覆蓋手動跑 `run_keypoints_openpifpaf.py` 產生在同一個資料夾的 `<stem>.json.gz`
 3. 呼叫 `correct_replay()`，輸出 `<stem>.wheelpair_corrected.json.gz`（放在 target replay 旁邊，不覆蓋原檔）
 
 工具全程不覆蓋任何既有檔案，唯一的例外是各 replay 旁邊的 `<stem>.trajectories.png` 軌跡圖（沿用 `trajectory_tools.py` 的預設輸出路徑，重跑會更新）。
